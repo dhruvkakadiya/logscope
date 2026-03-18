@@ -10,6 +10,7 @@
 
 import type { LogEntry } from "./types";
 import { commandName, eventName } from "./hci-opcodes";
+import { decodeCommand, decodeEvent, decodeAcl } from "./hci-decoders";
 
 // BT Monitor opcodes
 const OP_NEW_INDEX = 0;
@@ -96,6 +97,7 @@ export class HciParser {
     let pktType: string;
     let message: string;
     let severity: "inf" | "dbg" | "wrn" | "err" = "dbg";
+    let decoded: import("./types").DecodedPacket | null = null;
 
     switch (opcode) {
       case OP_COMMAND: {
@@ -104,7 +106,12 @@ export class HciParser {
         if (payload.length >= 3) {
           const cmdOpcode = payload.readUInt16LE(0);
           const paramLen = payload[2];
-          message = `${direction} ${pktType} ${commandName(cmdOpcode)} (${paramLen}B)`;
+          decoded = decodeCommand(cmdOpcode, payload);
+          if (decoded?.summary) {
+            message = `${direction} ${pktType} ${commandName(cmdOpcode)} ${decoded.summary}`;
+          } else {
+            message = `${direction} ${pktType} ${commandName(cmdOpcode)} (${paramLen}B)`;
+          }
         } else {
           message = `${direction} ${pktType} (${payload.length}B)`;
         }
@@ -119,7 +126,12 @@ export class HciParser {
           const evtCode = payload[0];
           const evtParamLen = payload[1];
           const evtPayload = payload.subarray(2);
-          message = `${direction} ${pktType} ${eventName(evtCode, evtPayload)} (${evtParamLen}B)`;
+          decoded = decodeEvent(evtCode, payload);
+          if (decoded?.summary) {
+            message = `${direction} ${pktType} ${eventName(evtCode, evtPayload)} ${decoded.summary}`;
+          } else {
+            message = `${direction} ${pktType} ${eventName(evtCode, evtPayload)} (${evtParamLen}B)`;
+          }
           // Highlight errors in events
           if (evtCode === 0x0F) { // Command Status
             const status = evtPayload.length > 0 ? evtPayload[0] : 0;
@@ -138,16 +150,26 @@ export class HciParser {
       case OP_ACL_TX: {
         direction = "TX";
         pktType = "ACL";
-        const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
-        message = `${direction} ${pktType} (${aclLen}B)`;
+        decoded = decodeAcl(payload);
+        if (decoded?.summary) {
+          message = `${direction} ${pktType} ${decoded.summary}`;
+        } else {
+          const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
+          message = `${direction} ${pktType} (${aclLen}B)`;
+        }
         break;
       }
 
       case OP_ACL_RX: {
         direction = "RX";
         pktType = "ACL";
-        const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
-        message = `${direction} ${pktType} (${aclLen}B)`;
+        decoded = decodeAcl(payload);
+        if (decoded?.summary) {
+          message = `${direction} ${pktType} ${decoded.summary}`;
+        } else {
+          const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
+          message = `${direction} ${pktType} (${aclLen}B)`;
+        }
         break;
       }
 
@@ -196,6 +218,12 @@ export class HciParser {
         return null; // Skip unknown opcodes
     }
 
+    const meta: Record<string, unknown> = {
+      opcode,
+      direction: opcode >= 2 && opcode <= 7 ? (opcode % 2 === 0 ? "tx" : "rx") : "",
+    };
+    if (decoded) meta.decoded = decoded;
+
     return {
       timestamp,
       source: "hci",
@@ -203,7 +231,7 @@ export class HciParser {
       module: pktType || "hci",
       message,
       raw: new Uint8Array(payload),
-      metadata: { opcode, direction: opcode >= 2 && opcode <= 7 ? (opcode % 2 === 0 ? "tx" : "rx") : "" },
+      metadata: meta,
     };
   }
 }

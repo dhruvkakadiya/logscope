@@ -83,13 +83,19 @@ export class LogScopePanel {
   /** Queue entries for batched delivery to the WebView */
   addEntries(entries: LogEntry[]): void {
     for (const e of entries) {
-      this.pendingEntries.push({
+      const serialized: Record<string, unknown> = {
         timestamp: e.timestamp,
         severity: e.severity,
         module: e.module,
         message: e.message,
         source: e.source,
-      });
+      };
+      // Include raw bytes + decoded fields for HCI entries (for expandable rows)
+      if (e.source === "hci") {
+        if (e.raw) serialized.raw = Array.from(e.raw);
+        if (e.metadata?.decoded) serialized.decoded = e.metadata.decoded;
+      }
+      this.pendingEntries.push(serialized);
     }
 
     if (!this.flushTimer) {
