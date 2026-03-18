@@ -10,13 +10,13 @@ export class StatusBar {
       100
     );
     this.connectionItem.command = "devscope.connect";
-    this.connectionItem.tooltip = "Devscope: Click to connect";
+    this.connectionItem.tooltip = "DevScope: Click to connect";
 
     this.countItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
       99
     );
-    this.countItem.tooltip = "Devscope: Log entry count";
+    this.countItem.tooltip = "DevScope: Log entry count";
 
     // Show items immediately
     this.update(false, 0, 0);
@@ -26,13 +26,13 @@ export class StatusBar {
 
   update(connected: boolean, entryCount: number, evictedCount: number): void {
     if (connected) {
-      this.connectionItem.text = "$(plug) Devscope: Connected";
+      this.connectionItem.text = "$(plug) DevScope: Connected";
       this.connectionItem.command = "devscope.disconnect";
-      this.connectionItem.tooltip = "Devscope: Click to disconnect";
+      this.connectionItem.tooltip = "DevScope: Click to disconnect";
     } else {
-      this.connectionItem.text = "$(debug-disconnect) Devscope: Disconnected";
+      this.connectionItem.text = "$(debug-disconnect) DevScope: Disconnected";
       this.connectionItem.command = "devscope.connect";
-      this.connectionItem.tooltip = "Devscope: Click to connect";
+      this.connectionItem.tooltip = "DevScope: Click to connect";
     }
 
     let countText = `$(list-ordered) ${entryCount.toLocaleString()}`;

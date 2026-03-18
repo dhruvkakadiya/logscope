@@ -43,7 +43,7 @@ export class DevScopePanel {
 
     this.panel = vscode.window.createWebviewPanel(
       "devscope.logViewer",
-      "Devscope",
+      "DevScope",
       vscode.ViewColumn.Two,
       {
         enableScripts: true,

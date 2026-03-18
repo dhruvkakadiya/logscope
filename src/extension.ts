@@ -96,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Connect ───────────────────────────────────────────────────
   const connectCmd = vscode.commands.registerCommand("devscope.connect", async () => {
     if (transport?.connected) {
-      vscode.window.showInformationMessage("Devscope: Already connected.");
+      vscode.window.showInformationMessage("DevScope: Already connected.");
       return;
     }
 
@@ -111,14 +111,14 @@ export function activate(context: vscode.ExtensionContext) {
     rtt.on("data", (chunk: Buffer) => handleChunk(chunk));
 
     rtt.on("disconnected", () => {
-      vscode.window.showWarningMessage("Devscope: RTT connection lost. Reconnect when ready.");
+      vscode.window.showWarningMessage("DevScope: RTT connection lost. Reconnect when ready.");
       statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
       panel?.updateStatus(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
     });
 
     rtt.on("error", (err: Error) => {
       vscode.window.showErrorMessage(
-        `Devscope: Connection error — ${err.message}. Is J-Link running?`
+        `DevScope: Connection error — ${err.message}. Is J-Link running?`
       );
     });
 
@@ -126,11 +126,11 @@ export function activate(context: vscode.ExtensionContext) {
       await rtt.connect();
       startStatusUpdates();
       vscode.window.showInformationMessage(
-        `Devscope: Connected to RTT at ${cfg.host}:${cfg.port}`
+        `DevScope: Connected to RTT at ${cfg.host}:${cfg.port}`
       );
     } catch {
       vscode.window.showErrorMessage(
-        `Devscope: Could not connect to ${cfg.host}:${cfg.port}. ` +
+        `DevScope: Could not connect to ${cfg.host}:${cfg.port}. ` +
           "Make sure J-Link is connected and the RTT telnet server is running."
       );
       transport = null;
@@ -140,7 +140,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Disconnect ────────────────────────────────────────────────
   const disconnectCmd = vscode.commands.registerCommand("devscope.disconnect", () => {
     if (!transport?.connected) {
-      vscode.window.showInformationMessage("Devscope: Not connected.");
+      vscode.window.showInformationMessage("DevScope: Not connected.");
       return;
     }
     transport.disconnect();
@@ -149,7 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
     stopStatusUpdates();
     statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
     panel?.updateStatus(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
-    vscode.window.showInformationMessage("Devscope: Disconnected.");
+    vscode.window.showInformationMessage("DevScope: Disconnected.");
   });
 
   // ── Open Panel ────────────────────────────────────────────────
@@ -160,7 +160,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Export ────────────────────────────────────────────────────
   const exportCmd = vscode.commands.registerCommand("devscope.export", async () => {
     if (!ringBuffer || ringBuffer.size === 0) {
-      vscode.window.showWarningMessage("Devscope: Nothing to export — no log entries captured yet.");
+      vscode.window.showWarningMessage("DevScope: Nothing to export — no log entries captured yet.");
       return;
     }
 
@@ -173,7 +173,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const text = exportAsText(ringBuffer.getAll());
     await vscode.workspace.fs.writeFile(uri, Buffer.from(text, "utf-8"));
-    vscode.window.showInformationMessage(`Devscope: Exported ${ringBuffer.size} entries to ${uri.fsPath}`);
+    vscode.window.showInformationMessage(`DevScope: Exported ${ringBuffer.size} entries to ${uri.fsPath}`);
   });
 
   context.subscriptions.push(connectCmd, disconnectCmd, openPanelCmd, exportCmd);

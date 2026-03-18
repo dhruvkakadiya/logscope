@@ -1,6 +1,6 @@
 {
   "name": "devscope",
-  "displayName": "Devscope",
+  "displayName": "DevScope",
   "description": "Modern embedded log viewer — Zephyr logs with filtering, search, and color-coding",
   "version": "0.1.0",
   "publisher": "novelbits",
@@ -18,23 +18,23 @@
     "commands": [
       {
         "command": "devscope.openPanel",
-        "title": "Devscope: Open Log Viewer"
+        "title": "DevScope: Open Log Viewer"
       },
       {
         "command": "devscope.connect",
-        "title": "Devscope: Connect to RTT"
+        "title": "DevScope: Connect to RTT"
       },
       {
         "command": "devscope.disconnect",
-        "title": "Devscope: Disconnect"
+        "title": "DevScope: Disconnect"
       },
       {
         "command": "devscope.export",
-        "title": "Devscope: Export Session"
+        "title": "DevScope: Export Session"
       }
     ],
     "configuration": {
-      "title": "Devscope",
+      "title": "DevScope",
       "properties": {
         "devscope.rtt.host": {
           "type": "string",
