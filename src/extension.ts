@@ -89,6 +89,10 @@ function wireTransportEvents(t: Transport): void {
     }
   });
 
+  t.on("reset", () => {
+    panel?.sendReset();
+  });
+
   t.on("disconnected", () => {
     if (!userDisconnecting) {
       panel?.sendDisconnected(true);
@@ -182,43 +186,42 @@ export function activate(context: vscode.ExtensionContext) {
   const autoConnect = devCfg.get<boolean>("autoConnect", false);
   const lastSerial = devCfg.get<string>("lastDevice", "");
 
-  setTimeout(async () => {
-    const devices = await scanAndSendDevices();
-
-    if (autoConnect && lastSerial && devices.length > 0) {
-      // Find the previously used device by serial number
-      const target = devices.find(d => String(d.serial) === lastSerial) ?? devices[0];
-      const device = "auto";
-
-      const MAX_RETRIES = 3;
-      const RETRY_DELAYS = [500, 1500, 3000];
-      const attemptAutoConnect = async (attempt: number) => {
-        try {
-          panel?.sendConnecting();
-          sidebarProvider.updateState({ connecting: true });
-          const pollInterval = getConfig().rttPollInterval;
-          await connectRtt(device, pollInterval);
-          const rttTransport = transport as NrfutilRttTransport;
-          const displayName = rttTransport.detectedDevice || "Connected";
-          panel?.sendConnected("J-Link RTT", displayName);
-          sidebarProvider.updateState({
-            connected: true, connecting: false,
-            transport: "J-Link RTT", address: displayName,
-          });
-        } catch (err) {
-          if (attempt < MAX_RETRIES) {
-            console.log(`[LogScope] Auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
-            setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
-          } else {
-            const message = err instanceof Error ? err.message : String(err);
-            panel?.sendConnectError(message);
-            sidebarProvider.updateState({ connecting: false });
-          }
+  if (autoConnect && lastSerial) {
+    // Fast path: skip discovery, connect immediately, scan in background
+    const attemptAutoConnect = async (attempt: number) => {
+      const MAX_RETRIES = 2;
+      const RETRY_DELAYS = [500, 2000];
+      try {
+        panel?.sendConnecting();
+        sidebarProvider.updateState({ connecting: true });
+        const pollInterval = getConfig().rttPollInterval;
+        await connectRtt("auto", pollInterval);
+        const rttTransport = transport as NrfutilRttTransport;
+        const displayName = rttTransport.detectedDevice || "Connected";
+        panel?.sendConnected("J-Link RTT", displayName);
+        sidebarProvider.updateState({
+          connected: true, connecting: false,
+          transport: "J-Link RTT", address: displayName,
+        });
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          console.log(`[LogScope] Auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
+          setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          panel?.sendConnectError(message);
+          sidebarProvider.updateState({ connecting: false });
         }
-      };
-      attemptAutoConnect(0);
-    }
-  }, 500);
+      }
+    };
+    // Connect immediately, no delay
+    attemptAutoConnect(0);
+    // Scan for devices in background (for the dropdown if user disconnects)
+    scanAndSendDevices();
+  } else {
+    // No auto-connect: just scan for devices
+    setTimeout(() => scanAndSendDevices(), 300);
+  }
 
   // Handle messages from WebView
   panel.setMessageHandler(async (msg) => {

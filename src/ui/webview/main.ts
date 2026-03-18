@@ -37,6 +37,7 @@ const devicePickerBtn = document.getElementById("device-picker-btn")!;
 const devicePickerText = document.getElementById("device-picker-text")!;
 const devicePickerList = document.getElementById("device-picker-list")!;
 const newDataBar = document.getElementById("new-data-bar")!;
+const endOfLog = document.getElementById("end-of-log")!;
 const connDevice = document.getElementById("conn-device")!;
 const connectionBar = document.getElementById("connection-bar")!;
 const inlineSettings = document.getElementById("inline-settings")!;
@@ -95,7 +96,7 @@ function createRow(entry: SerializedEntry): HTMLDivElement {
 
   const sev = document.createElement("span");
   sev.className = "sev";
-  sev.textContent = entry.severity.toUpperCase();
+  sev.textContent = entry.source === "hci" ? "HCI" : entry.severity.toUpperCase();
 
   const mod = document.createElement("span");
   mod.className = "mod";
@@ -267,9 +268,16 @@ timestampBtn.addEventListener("click", () => {
 // ── Auto-disable auto-scroll when user scrolls up ──────────────
 let programmaticScroll = false;
 timeline.addEventListener("scroll", () => {
-  if (!autoScroll || programmaticScroll) return;
+  if (programmaticScroll) return;
   const atBottom = timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 30;
-  if (!atBottom) {
+  if (atBottom) {
+    // Scrolled to bottom — hide new-data bar and re-enable auto-scroll
+    newDataBar.classList.add("hidden");
+    if (!autoScroll) {
+      autoScroll = true;
+      autoScrollBtn.classList.add("active");
+    }
+  } else if (autoScroll) {
     autoScroll = false;
     autoScrollBtn.classList.remove("active");
   }
@@ -414,6 +422,8 @@ function clearTimeline(): void {
   while (timeline.firstChild) {
     timeline.removeChild(timeline.firstChild);
   }
+  endOfLog.classList.add("hidden");
+  newDataBar.classList.add("hidden");
 }
 
 // ── Message handler ─────────────────────────────────────────────
@@ -495,6 +505,7 @@ window.addEventListener("message", (event) => {
       }
 
       timeline.appendChild(fragment);
+      endOfLog.classList.remove("hidden");
 
       if (autoScroll) {
         programmaticScroll = true;
@@ -542,6 +553,28 @@ window.addEventListener("message", (event) => {
 
     case "clear": {
       clearTimeline();
+      break;
+    }
+
+    case "reset": {
+      // Insert a visual reset separator in the timeline
+      const sep = document.createElement("div");
+      sep.className = "reset-separator";
+      const line1 = document.createElement("div");
+      line1.className = "reset-line";
+      const label = document.createElement("span");
+      label.textContent = "Device Reset";
+      const line2 = document.createElement("div");
+      line2.className = "reset-line";
+      sep.appendChild(line1);
+      sep.appendChild(label);
+      sep.appendChild(line2);
+      timeline.appendChild(sep);
+      if (autoScroll) {
+        programmaticScroll = true;
+        timeline.scrollTop = timeline.scrollHeight;
+        requestAnimationFrame(() => { programmaticScroll = false; });
+      }
       break;
     }
   }

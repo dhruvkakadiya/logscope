@@ -164,8 +164,15 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
         stderrBuf += text;
 
         for (const line of text.split("\n")) {
-          if (line.trim()) {
-            console.log(`[LogScope rtt-helper] ${line.trim()}`);
+          const trimmed = line.trim();
+          if (trimmed) {
+            console.log(`[LogScope rtt-helper] ${trimmed}`);
+          }
+          // Detect board reset recovery — only on full reconnect, not lightweight RTT restart
+          if (trimmed.startsWith("Reconnected OK")) {
+            if (resolved) {
+              this.emit("reset");
+            }
           }
         }
 

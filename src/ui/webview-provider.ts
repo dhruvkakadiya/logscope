@@ -163,6 +163,11 @@ export class LogScopePanel {
     this.panel?.webview.postMessage({ type: "connectError", message });
   }
 
+  /** Notify WebView that a board reset was detected */
+  sendReset(): void {
+    this.panel?.webview.postMessage({ type: "reset" });
+  }
+
   /** Send discovered devices to the WebView */
   sendDevices(devices: Array<{ serial: number; product: string; core?: string; device?: string }>): void {
     this.panel?.webview.postMessage({ type: "devices", devices });

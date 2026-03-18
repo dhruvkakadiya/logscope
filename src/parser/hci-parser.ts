@@ -204,7 +204,7 @@ export class HciParser {
       timestamp,
       source: "hci",
       severity,
-      module: "hci",
+      module: pktType || "hci",
       message,
       raw: new Uint8Array(payload),
       metadata: { opcode, direction: opcode >= 2 && opcode <= 7 ? (opcode % 2 === 0 ? "tx" : "rx") : "" },
