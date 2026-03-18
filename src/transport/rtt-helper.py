@@ -51,7 +51,7 @@ def run_pylink(device_or_addr, poll_ms):
             pass
         time.sleep(0.1)
     else:
-        print("ERROR: RTT control block not found within 5 seconds", file=sys.stderr)
+        print("ERROR: Could not connect to device. Make sure firmware with RTT logging is flashed and the device is powered on.", file=sys.stderr)
         jlink.rtt_stop()
         jlink.close()
         sys.exit(2)
@@ -63,37 +63,129 @@ def run_pylink(device_or_addr, poll_ms):
 
     stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
     poll_interval = poll_ms / 1000.0
-    errors = 0
+    consecutive_errors = 0
+    last_data_time = time.monotonic()
+    SILENCE_THRESHOLD = 10.0  # seconds of no data before RTT restart
+    reconnect_stage = 0  # 0=normal, 1=tried RTT restart, 2=tried full reconnect
 
     def write_frame(channel, data):
         """Write framed data: [channel:1][length:4 LE][data:N]"""
         stdout.write(bytes([channel]) + struct.pack('<I', len(data)) + data)
 
+    def restart_rtt():
+        """Lightweight RTT restart — stop and re-start RTT without closing J-Link."""
+        nonlocal has_hci
+        print("Restarting RTT session...", file=sys.stderr)
+        sys.stderr.flush()
+        try:
+            jlink.rtt_stop()
+        except Exception:
+            pass
+        time.sleep(0.3)
+        jlink.rtt_start()
+        for _ in range(50):
+            try:
+                num_up = jlink.rtt_get_num_up_buffers()
+                if num_up > 0:
+                    has_hci = num_up >= 2
+                    print(f"RTT restarted OK, buffers={num_up}", file=sys.stderr)
+                    sys.stderr.flush()
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.1)
+        print("RTT restart failed — control block not found", file=sys.stderr)
+        sys.stderr.flush()
+        return False
+
+    def full_reconnect():
+        """Full J-Link + RTT reconnect after board reset."""
+        nonlocal has_hci
+        print("Full J-Link reconnect...", file=sys.stderr)
+        sys.stderr.flush()
+        try:
+            jlink.rtt_stop()
+        except Exception:
+            pass
+        try:
+            jlink.close()
+        except Exception:
+            pass
+        time.sleep(0.5)
+        try:
+            jlink.open()
+            jlink.connect(device)
+            if jlink.halted():
+                jlink.restart()
+            jlink.rtt_start()
+        except Exception as e:
+            print(f"Reconnect failed: {e}", file=sys.stderr)
+            sys.stderr.flush()
+            return False
+        for _ in range(50):
+            try:
+                num_up = jlink.rtt_get_num_up_buffers()
+                if num_up > 0:
+                    has_hci = num_up >= 2
+                    print(f"Reconnected OK, buffers={num_up}", file=sys.stderr)
+                    sys.stderr.flush()
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.1)
+        print("Full reconnect failed — control block not found", file=sys.stderr)
+        sys.stderr.flush()
+        return False
+
     while True:
         try:
+            got_data = False
+
             # Channel 0: log text
             data = jlink.rtt_read(0, 4096)
             if data:
                 write_frame(0, bytes(data))
-                errors = 0
+                got_data = True
 
             # Channel 1: HCI binary (BT Monitor)
             if has_hci:
                 hci_data = jlink.rtt_read(1, 4096)
                 if hci_data:
                     write_frame(1, bytes(hci_data))
-                    errors = 0
+                    got_data = True
+
+            if got_data:
+                last_data_time = time.monotonic()
+                consecutive_errors = 0
+                reconnect_stage = 0
+            else:
+                silence = time.monotonic() - last_data_time
+                if silence > SILENCE_THRESHOLD and reconnect_stage == 0:
+                    # Stage 1: try lightweight RTT restart
+                    restart_rtt()
+                    last_data_time = time.monotonic()
+                    reconnect_stage = 1
+                elif silence > SILENCE_THRESHOLD and reconnect_stage == 1:
+                    # Stage 2: RTT restart didn't help, try full reconnect
+                    full_reconnect()
+                    last_data_time = time.monotonic()
+                    reconnect_stage = 2
+                elif silence > SILENCE_THRESHOLD and reconnect_stage == 2:
+                    # Stage 3: full reconnect didn't help either, keep retrying
+                    full_reconnect()
+                    last_data_time = time.monotonic()
 
         except BrokenPipeError:
             break
         except Exception as e:
-            errors += 1
-            print(f"RTT read error #{errors}: {e}", file=sys.stderr)
+            consecutive_errors += 1
+            print(f"RTT read error #{consecutive_errors}: {e}", file=sys.stderr)
             sys.stderr.flush()
-            if errors > 50:
-                print("Too many errors, exiting", file=sys.stderr)
-                break
-            time.sleep(poll_interval * 4)
+            if consecutive_errors >= 5:
+                full_reconnect()
+                consecutive_errors = 0
+                last_data_time = time.monotonic()
+                reconnect_stage = 0
             continue
 
         time.sleep(poll_interval)
@@ -232,12 +324,65 @@ def detect_device(nrfutil_path):
     return None, None
 
 
+def run_discover():
+    """Discover connected J-Link probes and output JSON to stdout."""
+    import json
+    try:
+        import pylink
+    except ImportError:
+        print(json.dumps({"error": "pylink not installed", "devices": []}))
+        return
+
+    # First, try nrfutil to get the actual target chip name
+    nrfutil_path = sys.argv[2] if len(sys.argv) > 2 else "nrfutil"
+    target_jlink, target_friendly = detect_device(nrfutil_path)
+
+    jlink = pylink.JLink()
+    emulators = jlink.connected_emulators()
+    devices = []
+    for emu in emulators:
+        serial = emu.SerialNumber
+        info = {"serial": serial}
+
+        if target_friendly:
+            # nrfutil identified the target chip (e.g., "nRF54L15")
+            info["targetName"] = target_friendly
+            info["device"] = target_jlink
+        else:
+            # Fall back to generic core detection via pylink
+            try:
+                jlink.open(serial_no=serial)
+                for core in ["Cortex-M33", "Cortex-M4", "Cortex-M7", "Cortex-M0+"]:
+                    try:
+                        jlink.connect(core)
+                        info["targetName"] = jlink.core_name()
+                        info["device"] = core
+                        break
+                    except Exception:
+                        continue
+                jlink.close()
+            except Exception:
+                info["targetName"] = "Unknown device"
+                try:
+                    jlink.close()
+                except Exception:
+                    pass
+        devices.append(info)
+    print(json.dumps({"devices": devices}))
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: rtt-helper.py <device_or_rtt_address> [poll_ms] [nrfutil_path]", file=sys.stderr)
+        print("Usage: rtt-helper.py <device_or_rtt_address|discover> [poll_ms] [nrfutil_path]", file=sys.stderr)
         sys.exit(1)
 
     device_or_addr = sys.argv[1]
+
+    # Discovery mode — just list connected probes and exit
+    if device_or_addr == "discover":
+        run_discover()
+        return
+
     poll_ms = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     nrfutil_path = sys.argv[3] if len(sys.argv) > 3 else "nrfutil"
 

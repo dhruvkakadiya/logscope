@@ -163,6 +163,11 @@ export class LogScopePanel {
     this.panel?.webview.postMessage({ type: "connectError", message });
   }
 
+  /** Send discovered devices to the WebView */
+  sendDevices(devices: Array<{ serial: number; product: string; core?: string; device?: string }>): void {
+    this.panel?.webview.postMessage({ type: "devices", devices });
+  }
+
   // ── HTML generation ───────────────────────────────────────────
 
   private getHtml(webview: vscode.Webview): string {

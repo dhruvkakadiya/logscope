@@ -16,7 +16,7 @@
   <div id="welcome" class="state">
     <div id="welcome-inner">
       <div id="welcome-logo">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="3" width="20" height="18" rx="2" />
           <path d="M5 12 Q7 4, 9 12 Q11 20, 13 12 Q15 4, 17 12 L19 12" />
         </svg>
@@ -25,49 +25,21 @@
       <p class="subtitle">Real-Time Embedded Log Viewer</p>
 
       <div id="connect-form">
-        <label>
-          Device
-          <select id="cfg-device">
-              <option value="auto">Auto-detect</option>
-              <optgroup label="Nordic Semiconductor">
-                <option value="NRF54L15_M33">nRF54L15</option>
-                <option value="NRF54H20_M33">nRF54H20</option>
-                <option value="NRF5340_XXAA_APP">nRF5340 (App Core)</option>
-                <option value="NRF5340_XXAA_NET">nRF5340 (Net Core)</option>
-                <option value="NRF52840_XXAA">nRF52840</option>
-                <option value="NRF52833_XXAA">nRF52833</option>
-                <option value="NRF52832_XXAA">nRF52832</option>
-                <option value="NRF9160_XXAA">nRF9160</option>
-                <option value="NRF9161_XXAA">nRF9161</option>
-              </optgroup>
-              <optgroup label="STMicroelectronics">
-                <option value="STM32F407VG">STM32F407</option>
-                <option value="STM32L476RG">STM32L476</option>
-                <option value="STM32H743ZI">STM32H743</option>
-                <option value="STM32WB55RG">STM32WB55</option>
-                <option value="STM32U585AI">STM32U585</option>
-              </optgroup>
-              <optgroup label="Infineon">
-                <option value="CY8C6247BZI_D54">PSoC 6 (CY8C6247)</option>
-                <option value="XMC4500_1024">XMC4500</option>
-              </optgroup>
-              <optgroup label="Silicon Labs">
-                <option value="EFR32BG22C224F512">EFR32BG22</option>
-                <option value="EFR32MG24B220F1536">EFR32MG24</option>
-              </optgroup>
-              <optgroup label="NXP">
-                <option value="LPC55S69_M33_0">LPC55S69</option>
-                <option value="MIMXRT1062xxx5B">i.MX RT1060</option>
-              </optgroup>
-              <optgroup label="Generic">
-                <option value="Cortex-M33">Cortex-M33</option>
-                <option value="Cortex-M4">Cortex-M4</option>
-                <option value="Cortex-M7">Cortex-M7</option>
-                <option value="Cortex-M0+">Cortex-M0+</option>
-              </optgroup>
-            </select>
-          </label>
+        <div class="form-group">
+          <span class="form-label">Device</span>
+          <div id="device-row">
+            <div id="device-picker">
+              <button id="device-picker-btn" type="button">
+                <span id="device-picker-text">Scanning...</span>
+                <span class="chevron">&#x25BE;</span>
+              </button>
+              <div id="device-picker-list" class="hidden"></div>
+            </div>
+            <input id="cfg-device" type="hidden" value="" />
+            <button id="refresh-btn" title="Refresh device list">&#x21bb;</button>
+          </div>
           <span class="form-hint">Connects via J-Link RTT</span>
+        </div>
 
         <div id="connect-error" class="hidden"></div>
 
@@ -81,7 +53,7 @@
 
       <div id="welcome-footer">
         <a id="novelbits-link" href="#">
-          <img src="{{logoUri}}" alt="Novel Bits" height="40" />
+          <img src="{{logoUri}}" alt="Novel Bits" height="36" />
           <span>by Novel Bits</span>
         </a>
       </div>
@@ -137,7 +109,14 @@
           <button class="severity-btn active" data-severity="inf">INF</button>
           <button class="severity-btn active" data-severity="dbg">DBG</button>
         </div>
-        <select id="module-select">
+        <div id="module-picker" class="mini-picker">
+          <button id="module-picker-btn" type="button" class="mini-picker-btn">
+            <span id="module-picker-text">All modules</span>
+            <span class="chevron">&#x25BE;</span>
+          </button>
+          <div id="module-picker-list" class="mini-picker-list hidden"></div>
+        </div>
+        <select id="module-select" class="hidden">
           <option value="">All modules</option>
         </select>
       </div>
@@ -152,7 +131,10 @@
     </div>
 
     <!-- Timeline -->
-    <div id="timeline"></div>
+    <div id="timeline-wrapper">
+      <div id="timeline"></div>
+      <div id="new-data-bar" class="hidden">&#x2193; New log entries</div>
+    </div>
 
     <!-- Status bar -->
     <div id="status-bar">

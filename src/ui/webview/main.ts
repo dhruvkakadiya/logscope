@@ -16,6 +16,9 @@ const vscode = acquireVsCodeApi();
 // ── DOM references: existing ────────────────────────────────────
 const timeline = document.getElementById("timeline")!;
 const moduleSelect = document.getElementById("module-select") as HTMLSelectElement;
+const modulePickerBtn = document.getElementById("module-picker-btn")!;
+const modulePickerText = document.getElementById("module-picker-text")!;
+const modulePickerList = document.getElementById("module-picker-list")!;
 const searchInput = document.getElementById("search-input") as HTMLInputElement;
 const autoScrollBtn = document.getElementById("auto-scroll-btn")!;
 const clearBtn = document.getElementById("clear-btn")!;
@@ -28,8 +31,12 @@ const welcomeEl = document.getElementById("welcome")!;
 const viewerEl = document.getElementById("viewer")!;
 const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
 const connectError = document.getElementById("connect-error")!;
-const cfgDevice = document.getElementById("cfg-device") as HTMLSelectElement;
+const cfgDevice = document.getElementById("cfg-device") as HTMLInputElement;
 const cfgAutoConnect = document.getElementById("cfg-auto-connect") as HTMLInputElement;
+const devicePickerBtn = document.getElementById("device-picker-btn")!;
+const devicePickerText = document.getElementById("device-picker-text")!;
+const devicePickerList = document.getElementById("device-picker-list")!;
+const newDataBar = document.getElementById("new-data-bar")!;
 const connDevice = document.getElementById("conn-device")!;
 const connectionBar = document.getElementById("connection-bar")!;
 const inlineSettings = document.getElementById("inline-settings")!;
@@ -141,6 +148,76 @@ document.getElementById("novelbits-link")?.addEventListener("click", (e) => {
   vscode.postMessage({ type: "openExternal", url: "https://novelbits.io" });
 });
 
+// ── Custom device picker ────────────────────────────────────────
+const refreshBtn = document.getElementById("refresh-btn")!;
+let pickerDevices: Array<{ serial: number; product: string; core?: string; device?: string }> = [];
+
+devicePickerBtn.addEventListener("click", () => {
+  if (pickerDevices.length === 0) return;
+  devicePickerList.classList.toggle("hidden");
+});
+
+// Close picker when clicking outside
+document.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.closest("#device-picker")) {
+    devicePickerList.classList.add("hidden");
+  }
+});
+
+function selectDevice(serial: string, label: string) {
+  cfgDevice.value = serial;
+  devicePickerText.textContent = label;
+  devicePickerList.classList.add("hidden");
+  connectBtn.disabled = false;
+  // Mark selected
+  const items = devicePickerList.querySelectorAll(".device-option");
+  items.forEach(item => {
+    const el = item as HTMLElement;
+    el.classList.toggle("selected", el.dataset.serial === serial);
+  });
+}
+
+function deviceLabel(dev: { serial: number; core?: string; device?: string; targetName?: string }): string {
+  const name = dev.targetName || "Unknown device";
+  return name + " (SN: " + dev.serial + ")";
+}
+
+function populateDeviceDropdown(devices: Array<{ serial: number; core?: string; device?: string; targetName?: string }>) {
+  pickerDevices = devices;
+  refreshBtn.classList.remove("spinning");
+  while (devicePickerList.firstChild) devicePickerList.removeChild(devicePickerList.firstChild);
+
+  if (devices.length === 0) {
+    devicePickerText.textContent = "No devices found";
+    cfgDevice.value = "";
+    connectBtn.disabled = true;
+    return;
+  }
+
+  for (const dev of devices) {
+    const item = document.createElement("div");
+    item.className = "device-option";
+    item.dataset.serial = String(dev.serial);
+    const label = deviceLabel(dev);
+    item.textContent = label;
+    item.addEventListener("click", () => selectDevice(String(dev.serial), label));
+    devicePickerList.appendChild(item);
+  }
+
+  // Auto-select first device
+  const first = devices[0];
+  selectDevice(String(first.serial), deviceLabel(first));
+}
+
+refreshBtn.addEventListener("click", () => {
+  refreshBtn.classList.add("spinning");
+  devicePickerText.textContent = "Scanning...";
+  cfgDevice.value = "";
+  connectBtn.disabled = true;
+  vscode.postMessage({ type: "refreshDevices" });
+});
+
 // ── Auto-connect checkbox ────────────────────────────────────────
 cfgAutoConnect.addEventListener("change", () => {
   vscode.postMessage({ type: "updateSetting", key: "autoConnect", value: cfgAutoConnect.checked });
@@ -231,6 +308,48 @@ moduleSelect.addEventListener("change", () => {
   sendFilterChanged();
 });
 
+// Module custom picker
+modulePickerBtn.addEventListener("click", () => {
+  modulePickerList.classList.toggle("hidden");
+});
+document.addEventListener("click", (e) => {
+  if (!(e.target as HTMLElement).closest("#module-picker")) {
+    modulePickerList.classList.add("hidden");
+  }
+});
+function selectModule(value: string, label: string) {
+  selectedModule = value;
+  moduleSelect.value = value;
+  modulePickerText.textContent = label;
+  modulePickerList.classList.add("hidden");
+  refilterTimeline();
+  sendFilterChanged();
+  const items = modulePickerList.querySelectorAll(".picker-option");
+  items.forEach(item => {
+    (item as HTMLElement).classList.toggle("selected", (item as HTMLElement).dataset.value === value);
+  });
+}
+function rebuildModulePicker() {
+  while (modulePickerList.firstChild) modulePickerList.removeChild(modulePickerList.firstChild);
+  // "All modules" option
+  const allItem = document.createElement("div");
+  allItem.className = "picker-option" + (selectedModule === "" ? " selected" : "");
+  allItem.dataset.value = "";
+  allItem.textContent = "All modules";
+  allItem.addEventListener("click", () => selectModule("", "All modules"));
+  modulePickerList.appendChild(allItem);
+  // Module options
+  for (let i = 1; i < moduleSelect.options.length; i++) {
+    const mod = moduleSelect.options[i].value;
+    const item = document.createElement("div");
+    item.className = "picker-option" + (selectedModule === mod ? " selected" : "");
+    item.dataset.value = mod;
+    item.textContent = mod;
+    item.addEventListener("click", () => selectModule(mod, mod));
+    modulePickerList.appendChild(item);
+  }
+}
+
 // Search input with 150ms debounce
 searchInput.addEventListener("input", () => {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -249,7 +368,18 @@ autoScrollBtn.addEventListener("click", () => {
     programmaticScroll = true;
     timeline.scrollTop = timeline.scrollHeight;
     requestAnimationFrame(() => { programmaticScroll = false; });
+    newDataBar.classList.add("hidden");
   }
+});
+
+// New data bar — click to scroll to bottom
+newDataBar.addEventListener("click", () => {
+  autoScroll = true;
+  autoScrollBtn.classList.add("active");
+  programmaticScroll = true;
+  timeline.scrollTop = timeline.scrollHeight;
+  requestAnimationFrame(() => { programmaticScroll = false; });
+  newDataBar.classList.add("hidden");
 });
 
 // Right-click copy on log rows
@@ -295,12 +425,6 @@ window.addEventListener("message", (event) => {
     case "init": {
       const { config, wrapEnabled: wrap } = msg;
       if (config) {
-        // Try to set the device dropdown — fall back to "auto" if no match
-        const targetDevice = config.lastDevice || config.device || "auto";
-        cfgDevice.value = targetDevice;
-        if (!cfgDevice.value || cfgDevice.value !== targetDevice) {
-          cfgDevice.value = "auto";
-        }
         cfgAutoConnect.checked = config.autoConnect ?? false;
       }
       wrapEnabled = wrap ?? false;
@@ -349,6 +473,11 @@ window.addEventListener("message", (event) => {
       break;
     }
 
+    case "devices": {
+      populateDeviceDropdown(msg.devices);
+      break;
+    }
+
     // ── Existing: log data messages ───────────────────────────
     case "entries": {
       const entries: SerializedEntry[] = msg.entries;
@@ -371,6 +500,9 @@ window.addEventListener("message", (event) => {
         programmaticScroll = true;
         timeline.scrollTop = timeline.scrollHeight;
         requestAnimationFrame(() => { programmaticScroll = false; });
+        newDataBar.classList.add("hidden");
+      } else {
+        newDataBar.classList.remove("hidden");
       }
       break;
     }
@@ -404,6 +536,7 @@ window.addEventListener("message", (event) => {
       if (currentValue && modules.includes(currentValue)) {
         moduleSelect.value = currentValue;
       }
+      rebuildModulePicker();
       break;
     }
 

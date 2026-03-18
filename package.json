@@ -3,7 +3,7 @@
   "displayName": "LogScope",
   "description": "Modern embedded log viewer — Zephyr logs with filtering, search, and color-coding",
   "version": "0.1.0",
-  "publisher": "Novel Bits",
+  "publisher": "novelbits",
   "author": {
     "name": "Novel Bits"
   },
@@ -155,10 +155,12 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "test": "jest",
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package",
+    "install-ext": "npx @vscode/vsce package && code --install-extension logscope-*.vsix"
   },
   "repository": {
     "type": "git",

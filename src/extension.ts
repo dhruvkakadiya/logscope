@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { NrfutilRttTransport } from "./transport/nrfutil-rtt";
+import { NrfutilRttTransport, discoverDevices } from "./transport/nrfutil-rtt";
+import type { DiscoveredDevice } from "./transport/nrfutil-rtt";
 import { ZephyrLogParser } from "./parser/zephyr-log";
 import { HciParser } from "./parser/hci-parser";
 import { RingBuffer } from "./model/ring-buffer";
@@ -22,6 +23,7 @@ let statusInterval: ReturnType<typeof setInterval> | null = null;
 let lineBuffer = "";
 const sidebarProvider = new LogScopeSidebarProvider();
 let userDisconnecting = false;
+let lastDiscoveredDevices: DiscoveredDevice[] = [];
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -167,33 +169,56 @@ export function activate(context: vscode.ExtensionContext) {
   const cfg = getConfig();
   panel.show(getInitConfig(), cfg.logWrap);
 
-  // Auto-connect if enabled AND a previous successful connection exists
-  // The "lastDevice" is only set after a successful connect, so empty means never connected
+  // Scan for devices and send to webview
+  async function scanAndSendDevices() {
+    const devices = await discoverDevices();
+    lastDiscoveredDevices = devices;
+    panel?.sendDevices(devices);
+    return devices;
+  }
+
+  // Initial scan + auto-connect if enabled
   const devCfg = vscode.workspace.getConfiguration("logscope");
   const autoConnect = devCfg.get<boolean>("autoConnect", false);
-  const lastDevice = devCfg.get<string>("lastDevice", "");
-  if (autoConnect && lastDevice && lastDevice !== "auto") {
-    // Delay slightly to let the WebView initialize
-    setTimeout(async () => {
-      try {
-        panel?.sendConnecting();
-        sidebarProvider.updateState({ connecting: true });
-        const pollInterval = cfg.rttPollInterval;
-        await connectRtt(lastDevice, pollInterval);
-        const rttTransport = transport as NrfutilRttTransport;
-        const displayName = rttTransport.detectedDevice || lastDevice;
-        panel?.sendConnected("J-Link RTT", displayName);
-        sidebarProvider.updateState({
-          connected: true, connecting: false,
-          transport: "J-Link RTT", address: displayName,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        panel?.sendConnectError(message);
-        sidebarProvider.updateState({ connecting: false });
-      }
-    }, 500);
-  }
+  const lastSerial = devCfg.get<string>("lastDevice", "");
+
+  setTimeout(async () => {
+    const devices = await scanAndSendDevices();
+
+    if (autoConnect && lastSerial && devices.length > 0) {
+      // Find the previously used device by serial number
+      const target = devices.find(d => String(d.serial) === lastSerial) ?? devices[0];
+      const device = "auto";
+
+      const MAX_RETRIES = 3;
+      const RETRY_DELAYS = [500, 1500, 3000];
+      const attemptAutoConnect = async (attempt: number) => {
+        try {
+          panel?.sendConnecting();
+          sidebarProvider.updateState({ connecting: true });
+          const pollInterval = getConfig().rttPollInterval;
+          await connectRtt(device, pollInterval);
+          const rttTransport = transport as NrfutilRttTransport;
+          const displayName = rttTransport.detectedDevice || "Connected";
+          panel?.sendConnected("J-Link RTT", displayName);
+          sidebarProvider.updateState({
+            connected: true, connecting: false,
+            transport: "J-Link RTT", address: displayName,
+          });
+        } catch (err) {
+          if (attempt < MAX_RETRIES) {
+            console.log(`[LogScope] Auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
+            setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
+          } else {
+            const message = err instanceof Error ? err.message : String(err);
+            panel?.sendConnectError(message);
+            sidebarProvider.updateState({ connecting: false });
+          }
+        }
+      };
+      attemptAutoConnect(0);
+    }
+  }, 500);
 
   // Handle messages from WebView
   panel.setMessageHandler(async (msg) => {
@@ -208,15 +233,19 @@ export function activate(context: vscode.ExtensionContext) {
         sidebarProvider.updateState({ connecting: true });
 
         try {
-          const device = config.device || "auto";
+          // config.device is a serial number from discovery — always use "auto"
+          // so the helper can detect the specific chip (e.g., NRF54L15_M33 vs generic Cortex-M33)
+          const serial = config.device;
+          const discovered = lastDiscoveredDevices.find(d => String(d.serial) === serial);
+          const device = "auto";
           const pollInterval = getConfig().rttPollInterval;
           await connectRtt(device, pollInterval);
-          // Use the detected device name if auto-detected
           const rttTransport = transport as NrfutilRttTransport;
-          const displayName = rttTransport.detectedDevice || device;
-          // Save last device for auto-connect
+          // Prefer detected target chip name; probe product name describes the debugger, not the target
+          const displayName = rttTransport.detectedDevice || "Connected";
+          // Save serial number for auto-connect on reload
           const devCfg = vscode.workspace.getConfiguration("logscope");
-          await devCfg.update("lastDevice", displayName, vscode.ConfigurationTarget.Workspace);
+          await devCfg.update("lastDevice", serial, vscode.ConfigurationTarget.Workspace);
           panel?.sendConnected("J-Link RTT", displayName);
           sidebarProvider.updateState({
             connected: true, connecting: false,
@@ -228,6 +257,13 @@ export function activate(context: vscode.ExtensionContext) {
           sidebarProvider.updateState({ connecting: false });
           disconnectAll();
         }
+        break;
+      }
+
+      case "refreshDevices": {
+        const devices = await discoverDevices();
+        lastDiscoveredDevices = devices;
+        panel?.sendDevices(devices);
         break;
       }
 

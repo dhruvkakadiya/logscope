@@ -61,6 +61,43 @@ async function ensurePythonWithPylink(): Promise<string> {
   return VENV_PYTHON;
 }
 
+/** Discovered J-Link probe info */
+export interface DiscoveredDevice {
+  serial: number;
+  product: string;
+  core?: string;
+  device?: string;
+  jlinkProduct?: string;
+}
+
+/**
+ * Discover connected J-Link probes via pylink.
+ * Returns a list of connected devices with serial numbers.
+ */
+export async function discoverDevices(): Promise<DiscoveredDevice[]> {
+  const helperPath = path.join(__dirname, "rtt-helper.py");
+  const pythonPath = await ensurePythonWithPylink();
+
+  return new Promise((resolve) => {
+    const proc = spawn(pythonPath, [helperPath, "discover"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10_000,
+    });
+
+    let stdout = "";
+    proc.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.on("exit", () => {
+      try {
+        const result = JSON.parse(stdout);
+        resolve(result.devices ?? []);
+      } catch {
+        resolve([]);
+      }
+    });
+    proc.on("error", () => resolve([]));
+  });
+}
+
 /**
  * RTT transport via SEGGER J-Link.
  *
