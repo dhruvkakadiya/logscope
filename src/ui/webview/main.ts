@@ -13,7 +13,7 @@ interface SerializedEntry {
 // @ts-expect-error — acquireVsCodeApi is injected by the WebView host
 const vscode = acquireVsCodeApi();
 
-// ── DOM references ──────────────────────────────────────────────
+// ── DOM references: existing ────────────────────────────────────
 const timeline = document.getElementById("timeline")!;
 const moduleSelect = document.getElementById("module-select") as HTMLSelectElement;
 const searchInput = document.getElementById("search-input") as HTMLInputElement;
@@ -23,12 +23,40 @@ const statusConnection = document.getElementById("status-connection")!;
 const statusCount = document.getElementById("status-count")!;
 const statusEvicted = document.getElementById("status-evicted")!;
 
+// ── DOM references: new (connection states) ─────────────────────
+const welcomeEl = document.getElementById("welcome")!;
+const viewerEl = document.getElementById("viewer")!;
+const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
+const connectError = document.getElementById("connect-error")!;
+const cfgDevice = document.getElementById("cfg-device") as HTMLSelectElement;
+const cfgAutoConnect = document.getElementById("cfg-auto-connect") as HTMLInputElement;
+const connLabel = document.getElementById("conn-label")!;
+const connectionBar = document.getElementById("connection-bar")!;
+const inlineSettings = document.getElementById("inline-settings")!;
+const reconnectBar = document.getElementById("reconnect-bar")!;
+const settingsBtn = document.getElementById("settings-btn")!;
+const disconnectBtn = document.getElementById("disconnect-btn")!;
+const exportBtn = document.getElementById("export-btn")!;
+const reconnectBtn = document.getElementById("reconnect-btn")!;
+const dismissBtn = document.getElementById("dismiss-btn")!;
+const wrapBtn = document.getElementById("wrap-btn")!;
+const timestampBtn = document.getElementById("timestamp-btn")!;
+
 // ── State ───────────────────────────────────────────────────────
 let autoScroll = true;
+let timestampsVisible = true;
 const activeSeverities = new Set(["err", "wrn", "inf", "dbg"]);
 let selectedModule = ""; // "" means all modules
 let searchText = "";
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let wrapEnabled = false;
+let lastConnectConfig: Record<string, unknown> | null = null;
+
+// ── State management ────────────────────────────────────────────
+function showState(state: "welcome" | "viewer") {
+  welcomeEl.classList.toggle("hidden", state !== "welcome");
+  viewerEl.classList.toggle("hidden", state !== "viewer");
+}
 
 // ── Timestamp formatting ────────────────────────────────────────
 function formatTimestamp(us: number): string {
@@ -80,9 +108,7 @@ function createRow(entry: SerializedEntry): HTMLDivElement {
 // ── Visibility check ────────────────────────────────────────────
 function shouldShow(entry: SerializedEntry): boolean {
   if (!activeSeverities.has(entry.severity)) return false;
-
   if (selectedModule && entry.module !== selectedModule) return false;
-
   if (searchText) {
     const lower = searchText.toLowerCase();
     if (
@@ -92,7 +118,6 @@ function shouldShow(entry: SerializedEntry): boolean {
       return false;
     }
   }
-
   return true;
 }
 
@@ -105,6 +130,76 @@ function sendFilterChanged(): void {
     searchText,
   });
 }
+
+// ── Branding link ───────────────────────────────────────
+document.getElementById("novelbits-link")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  vscode.postMessage({ type: "openExternal", url: "https://novelbits.io" });
+});
+
+// ── Auto-connect checkbox ────────────────────────────────────────
+cfgAutoConnect.addEventListener("change", () => {
+  vscode.postMessage({ type: "updateSetting", key: "autoConnect", value: cfgAutoConnect.checked });
+});
+
+// ── Connect form ────────────────────────────────────────────────
+function getFormConfig() {
+  return {
+    transport: "rtt",
+    device: cfgDevice.value,
+  };
+}
+
+connectBtn.addEventListener("click", () => {
+  const config = getFormConfig();
+  lastConnectConfig = config;
+  vscode.postMessage({ type: "connect", config });
+});
+
+// ── Connected state buttons ─────────────────────────────────────
+disconnectBtn.addEventListener("click", () => vscode.postMessage({ type: "disconnect" }));
+exportBtn.addEventListener("click", () => vscode.postMessage({ type: "export" }));
+
+reconnectBtn.addEventListener("click", () => {
+  if (lastConnectConfig) {
+    vscode.postMessage({ type: "reconnect", config: lastConnectConfig });
+  }
+});
+
+dismissBtn.addEventListener("click", () => {
+  reconnectBar.classList.add("hidden");
+  showState("welcome");
+});
+
+settingsBtn.addEventListener("click", () => {
+  const isHidden = inlineSettings.classList.toggle("hidden");
+  settingsBtn.classList.toggle("active", !isHidden);
+});
+
+// ── Timestamp toggle ────────────────────────────────────────────
+timestampBtn.addEventListener("click", () => {
+  timestampsVisible = !timestampsVisible;
+  timestampBtn.classList.toggle("active", timestampsVisible);
+  timeline.classList.toggle("hide-timestamps", !timestampsVisible);
+});
+
+// ── Auto-disable auto-scroll when user scrolls up ──────────────
+timeline.addEventListener("scroll", () => {
+  if (!autoScroll) return;
+  const atBottom = timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 20;
+  if (!atBottom) {
+    autoScroll = false;
+    autoScrollBtn.classList.remove("active");
+  }
+});
+
+// ── Wrap toggle ─────────────────────────────────────────────────
+wrapBtn.addEventListener("click", () => {
+  wrapEnabled = !wrapEnabled;
+  wrapBtn.classList.toggle("active", wrapEnabled);
+  timeline.classList.toggle("wrap-mode", wrapEnabled);
+  vscode.postMessage({ type: "updateSetting", key: "logscope.logWrap", value: wrapEnabled });
+});
 
 // ── Filter controls ─────────────────────────────────────────────
 
@@ -156,7 +251,6 @@ clearBtn.addEventListener("click", () => {
 });
 
 // ── Refilter: hide/show existing rows based on current filters ──
-// We store the entry data on each row so we can re-evaluate visibility.
 function refilterTimeline(): void {
   const rows = timeline.querySelectorAll(".log-row");
   rows.forEach((row) => {
@@ -179,6 +273,64 @@ window.addEventListener("message", (event) => {
   const msg = event.data;
 
   switch (msg.type) {
+    // ── New: connection state messages ─────────────────────────
+    case "init": {
+      const { config, wrapEnabled: wrap } = msg;
+      if (config) {
+        if (config.lastDevice) {
+          cfgDevice.value = config.lastDevice;
+        } else if (config.device) {
+          cfgDevice.value = config.device;
+        }
+        cfgAutoConnect.checked = config.autoConnect ?? false;
+      }
+      wrapEnabled = wrap ?? false;
+      wrapBtn.classList.toggle("active", wrapEnabled);
+      timeline.classList.toggle("wrap-mode", wrapEnabled);
+      break;
+    }
+
+    case "connecting": {
+      connectBtn.disabled = true;
+      connectBtn.textContent = "Connecting...";
+      connectError.classList.add("hidden");
+      break;
+    }
+
+    case "connected": {
+      connectBtn.disabled = false;
+      connectBtn.textContent = "Connect";
+      connLabel.textContent = `Connected via ${msg.transport} @ ${msg.address}`;
+      connectionBar.classList.remove("hidden");
+      reconnectBar.classList.add("hidden");
+      inlineSettings.classList.add("hidden");
+      settingsBtn.classList.remove("active");
+      showState("viewer");
+      break;
+    }
+
+    case "disconnected": {
+      connectBtn.disabled = false;
+      connectBtn.textContent = "Connect";
+      if (msg.unexpected) {
+        // Show reconnect bar, keep logs visible
+        reconnectBar.classList.remove("hidden");
+        connectionBar.classList.add("hidden");
+      } else {
+        showState("welcome");
+      }
+      break;
+    }
+
+    case "connectError": {
+      connectBtn.disabled = false;
+      connectBtn.textContent = "Connect";
+      connectError.textContent = msg.message;
+      connectError.classList.remove("hidden");
+      break;
+    }
+
+    // ── Existing: log data messages ───────────────────────────
     case "entries": {
       const entries: SerializedEntry[] = msg.entries;
       const fragment = document.createDocumentFragment();

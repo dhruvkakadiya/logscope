@@ -1,4 +1,4 @@
-import { Session, serializeSession, deserializeSession, exportAsText } from "../../src/model/session";
+import { Session, serializeSession, deserializeSession, exportAsText, exportAsJsonLines } from "../../src/model/session";
 import type { LogEntry } from "../../src/parser/types";
 
 function makeEntry(timestamp: number, message: string): LogEntry {
@@ -58,5 +58,23 @@ describe("exportAsText", () => {
     expect(text).toContain("Connected");
     expect(text).toContain("[ERR]");
     expect(text).toContain("[ble]");
+  });
+});
+
+describe("exportAsJsonLines", () => {
+  test("exports entries as JSON Lines", () => {
+    const entries = [
+      { timestamp: 1002056, source: "log" as const, severity: "inf" as const, module: "sensor_drv", message: "Temperature: 23.17 C", metadata: {} },
+      { timestamp: 2003112, source: "log" as const, severity: "dbg" as const, module: "ble_conn", message: "Advertising: 110 ms", metadata: {} },
+    ];
+    const result = exportAsJsonLines(entries);
+    const lines = result.trim().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0])).toEqual({
+      timestamp: 1002056, severity: "inf", module: "sensor_drv", message: "Temperature: 23.17 C"
+    });
+    expect(JSON.parse(lines[1])).toEqual({
+      timestamp: 2003112, severity: "dbg", module: "ble_conn", message: "Advertising: 110 ms"
+    });
   });
 });

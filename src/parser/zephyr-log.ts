@@ -4,6 +4,10 @@ import type { LogEntry, Parser, Severity } from "./types";
 const ZEPHYR_LOG_RE =
   /^\[(\d{2}):(\d{2}):(\d{2})\.(\d{3}),(\d{3})\]\s+<(err|wrn|inf|dbg)>\s+([\w.]+):\s?(.*)/;
 
+// Strip ANSI escape codes (color codes from Zephyr's CONFIG_LOG_BACKEND_RTT)
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
 export class ZephyrLogParser implements Parser {
   parse(data: string | Uint8Array): LogEntry[] {
     const text = typeof data === "string" ? data : new TextDecoder().decode(data);
@@ -11,7 +15,7 @@ export class ZephyrLogParser implements Parser {
     const entries: LogEntry[] = [];
 
     for (const line of lines) {
-      const trimmed = line.trimEnd();
+      const trimmed = line.replace(ANSI_RE, "").trimEnd();
       if (!trimmed) continue;
 
       const match = trimmed.match(ZEPHYR_LOG_RE);

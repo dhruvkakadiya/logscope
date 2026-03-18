@@ -15,7 +15,7 @@ interface SerializedEntry {
 /** Callback when the WebView sends a message back */
 export type WebViewMessageHandler = (msg: { type: string; [key: string]: unknown }) => void;
 
-export class DevScopePanel {
+export class LogScopePanel {
   private panel: vscode.WebviewPanel | null = null;
   private readonly extensionUri: vscode.Uri;
   private onMessage: WebViewMessageHandler | null = null;
@@ -34,22 +34,26 @@ export class DevScopePanel {
     this.onMessage = handler;
   }
 
-  /** Show or reveal the panel */
-  show(): void {
+  /** Show or reveal the panel. Sends init message to bootstrap config. */
+  show(initConfig?: Record<string, unknown>, wrapEnabled = false): void {
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.Two);
+      if (initConfig) {
+        this.sendInit(initConfig, wrapEnabled);
+      }
       return;
     }
 
     this.panel = vscode.window.createWebviewPanel(
-      "devscope.logViewer",
-      "DevScope",
+      "logscope.logViewer",
+      "LogScope",
       vscode.ViewColumn.Two,
       {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [
           vscode.Uri.joinPath(this.extensionUri, "out", "webview"),
+          vscode.Uri.joinPath(this.extensionUri, "assets"),
         ],
       }
     );
@@ -69,6 +73,11 @@ export class DevScopePanel {
         this.flushTimer = null;
       }
     });
+
+    // Send init after a short delay to ensure the WebView script has loaded
+    if (initConfig) {
+      setTimeout(() => this.sendInit(initConfig, wrapEnabled), 100);
+    }
   }
 
   /** Queue entries for batched delivery to the WebView */
@@ -84,7 +93,7 @@ export class DevScopePanel {
     }
 
     if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => this.flushEntries(), DevScopePanel.FLUSH_INTERVAL_MS);
+      this.flushTimer = setTimeout(() => this.flushEntries(), LogScopePanel.FLUSH_INTERVAL_MS);
     }
   }
 
@@ -127,6 +136,33 @@ export class DevScopePanel {
     return this.panel?.visible ?? false;
   }
 
+  // ── Connection state messages ─────────────────────────────────
+
+  /** Bootstrap the WebView with current config and state */
+  sendInit(config: Record<string, unknown>, wrapEnabled: boolean): void {
+    this.panel?.webview.postMessage({ type: "init", config, wrapEnabled });
+  }
+
+  /** Notify WebView that connection attempt started */
+  sendConnecting(): void {
+    this.panel?.webview.postMessage({ type: "connecting" });
+  }
+
+  /** Notify WebView that connection succeeded */
+  sendConnected(transport: string, address: string): void {
+    this.panel?.webview.postMessage({ type: "connected", transport, address });
+  }
+
+  /** Notify WebView of disconnection (user-initiated or unexpected) */
+  sendDisconnected(unexpected: boolean): void {
+    this.panel?.webview.postMessage({ type: "disconnected", unexpected });
+  }
+
+  /** Notify WebView that connection attempt failed */
+  sendConnectError(message: string): void {
+    this.panel?.webview.postMessage({ type: "connectError", message });
+  }
+
   // ── HTML generation ───────────────────────────────────────────
 
   private getHtml(webview: vscode.Webview): string {
@@ -134,6 +170,9 @@ export class DevScopePanel {
 
     const stylesUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "out", "webview", "styles.css")
+    );
+    const logoUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, "assets", "novelbits-logo.png")
     );
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "out", "webview", "main.js")
@@ -151,6 +190,7 @@ export class DevScopePanel {
       .replace(/\{\{nonce\}\}/g, nonce)
       .replace(/\{\{cspSource\}\}/g, webview.cspSource)
       .replace(/\{\{stylesUri\}\}/g, stylesUri.toString())
+      .replace(/\{\{logoUri\}\}/g, logoUri.toString())
       .replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 
     return html;

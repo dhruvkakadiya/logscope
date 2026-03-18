@@ -56,3 +56,14 @@ export function exportAsText(entries: LogEntry[]): string {
     })
     .join("\n");
 }
+
+export function exportAsJsonLines(entries: LogEntry[]): string {
+  return entries
+    .map((e) => JSON.stringify({
+      timestamp: e.timestamp,
+      severity: e.severity,
+      module: e.module,
+      message: e.message,
+    }))
+    .join("\n") + "\n";
+}

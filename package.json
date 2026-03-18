@@ -1,9 +1,12 @@
 {
-  "name": "devscope",
-  "displayName": "DevScope",
+  "name": "logscope",
+  "displayName": "LogScope",
   "description": "Modern embedded log viewer — Zephyr logs with filtering, search, and color-coding",
   "version": "0.1.0",
-  "publisher": "novelbits",
+  "publisher": "Novel-Bits",
+  "author": {
+    "name": "Novel Bits"
+  },
   "license": "MIT",
   "engines": {
     "vscode": "^1.110.0"
@@ -12,70 +15,128 @@
     "Debuggers",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": ["onView:logscope.sidebar"],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [{
+        "id": "logscope",
+        "title": "LogScope",
+        "icon": "assets/icon.svg"
+      }]
+    },
+    "views": {
+      "logscope": [{
+        "id": "logscope.sidebar",
+        "name": "LogScope"
+      }]
+    },
     "commands": [
       {
-        "command": "devscope.openPanel",
-        "title": "DevScope: Open Log Viewer"
+        "command": "logscope.open",
+        "title": "LogScope: Open Log Viewer"
       },
       {
-        "command": "devscope.connect",
-        "title": "DevScope: Connect to RTT"
+        "command": "logscope.connect",
+        "title": "LogScope: Connect"
       },
       {
-        "command": "devscope.disconnect",
-        "title": "DevScope: Disconnect"
+        "command": "logscope.disconnect",
+        "title": "LogScope: Disconnect"
       },
       {
-        "command": "devscope.export",
-        "title": "DevScope: Export Session"
+        "command": "logscope.export",
+        "title": "LogScope: Export"
       }
     ],
     "configuration": {
-      "title": "DevScope",
+      "title": "LogScope",
       "properties": {
-        "devscope.rtt.host": {
+        "logscope.transport": {
+          "type": "string",
+          "default": "rtt",
+          "enum": ["rtt", "jlink-telnet"],
+          "enumDescriptions": [
+            "J-Link RTT via pylink (recommended — works with any J-Link device)",
+            "Connect to J-Link RTT telnet server (legacy)"
+          ],
+          "description": "Transport mode for reading RTT data."
+        },
+        "logscope.rtt.address": {
+          "type": "string",
+          "default": "auto",
+          "description": "RTT control block address (hex, e.g. 0x20004050). Set to 'auto' to detect from Zephyr ELF automatically."
+        },
+        "logscope.rtt.pollInterval": {
+          "type": "number",
+          "default": 50,
+          "description": "RTT poll interval in milliseconds (nrfutil transport only). Lower = faster updates but more SWD traffic."
+        },
+        "logscope.nrfutil.path": {
+          "type": "string",
+          "default": "nrfutil",
+          "description": "Path to nrfutil binary. Leave as 'nrfutil' if it's on your PATH."
+        },
+        "logscope.rtt.host": {
           "type": "string",
           "default": "localhost",
-          "description": "J-Link RTT telnet server host"
+          "description": "J-Link RTT telnet server host (jlink-telnet transport only)"
         },
-        "devscope.rtt.port": {
+        "logscope.rtt.port": {
           "type": "number",
           "default": 19021,
-          "description": "J-Link RTT telnet server port (Channel 0)"
+          "description": "J-Link RTT telnet server port (jlink-telnet transport only)"
         },
-        "devscope.maxEntries": {
+        "logscope.maxEntries": {
           "type": "number",
           "default": 100000,
           "description": "Maximum number of log entries to keep in memory"
         },
-        "devscope.jlink.path": {
+        "logscope.autoConnect": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically connect to the last-used device when LogScope opens."
+        },
+        "logscope.lastDevice": {
+          "type": "string",
+          "default": "",
+          "description": "Last connected device (used for auto-connect). Set automatically."
+        },
+        "logscope.logWrap": {
+          "type": "boolean",
+          "default": false,
+          "description": "Wrap long log messages instead of truncating. Toggle via the wrap button in the viewer."
+        },
+        "logscope.jlink.path": {
           "type": "string",
           "default": "",
           "description": "Path to JLinkExe. Leave empty to auto-detect."
         },
-        "devscope.jlink.device": {
+        "logscope.jlink.device": {
           "type": "string",
-          "default": "NRF54L15",
-          "description": "Target device name for J-Link connection"
+          "default": "Cortex-M33",
+          "description": "Target device name for J-Link connection (use Cortex-M33 for nRF54L15)"
         },
-        "devscope.jlink.interface": {
+        "logscope.jlink.interface": {
           "type": "string",
           "default": "SWD",
           "enum": ["SWD", "JTAG"],
           "description": "Debug interface type"
         },
-        "devscope.jlink.speed": {
+        "logscope.jlink.speed": {
           "type": "number",
           "default": 4000,
           "description": "J-Link connection speed in kHz"
         },
-        "devscope.jlink.autoStart": {
+        "logscope.jlink.autoStart": {
           "type": "boolean",
           "default": true,
           "description": "Automatically start J-Link when connecting. Disable to connect to an existing RTT server."
+        },
+        "logscope.jlink.rttSearchRanges": {
+          "type": "string",
+          "default": "0x20000000 0x80000",
+          "description": "RTT control block search range (base size in hex). Default covers 512KB starting at 0x20000000 which works for most ARM Cortex-M devices."
         }
       }
     }
@@ -88,12 +149,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NovelBits/devscope.git"
+    "url": "git+https://github.com/NovelBits/logscope.git"
   },
   "bugs": {
-    "url": "https://github.com/NovelBits/devscope/issues"
+    "url": "https://github.com/NovelBits/logscope/issues"
   },
-  "homepage": "https://github.com/NovelBits/devscope#readme",
+  "homepage": "https://github.com/NovelBits/logscope#readme",
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^25.5.0",

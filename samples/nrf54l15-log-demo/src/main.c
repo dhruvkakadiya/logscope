@@ -15,6 +15,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include "msg_counter.h"
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_DBG);
 
@@ -23,20 +24,23 @@ void simulate_sensor_activity(void);
 void simulate_ble_activity(void);
 void simulate_storage_activity(void);
 
+/* Global message sequence counter (defined here, declared in msg_counter.h) */
+atomic_t msg_seq = ATOMIC_INIT(0);
+
 int main(void)
 {
-	LOG_INF("DevScope Log Demo started on nRF54L15 DK");
-	LOG_INF("Connect DevScope to RTT at localhost:19021");
-	LOG_DBG("Log level: DEBUG (all messages visible)");
+	SEQ_LOG_INF("DevScope Log Demo started on nRF54L15 DK");
+	SEQ_LOG_INF("Both RTT and UART backends active");
+	SEQ_LOG_DBG("Log level: DEBUG (all messages visible)");
 
 	int cycle = 0;
 
 	while (1) {
 		cycle++;
 
-		/* Main app heartbeat */
+		/* Main app heartbeat every 10 cycles */
 		if (cycle % 10 == 0) {
-			LOG_INF("Heartbeat: cycle %d, uptime %lld ms",
+			SEQ_LOG_INF("Heartbeat: cycle %d, uptime %lld ms",
 				cycle, k_uptime_get());
 		}
 

@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
-import { RttTransport } from "./transport/rtt";
-import { JLinkManager } from "./transport/jlink-manager";
+import { NrfutilRttTransport } from "./transport/nrfutil-rtt";
 import { ZephyrLogParser } from "./parser/zephyr-log";
 import { RingBuffer } from "./model/ring-buffer";
-import { Session, exportAsText } from "./model/session";
-import { DevScopePanel } from "./ui/webview-provider";
+import { Session, exportAsText, exportAsJsonLines } from "./model/session";
+import { LogScopePanel } from "./ui/webview-provider";
 import { StatusBar } from "./ui/status-bar";
+import { LogScopeSidebarProvider } from "./ui/sidebar-provider";
+import { autoDetectRttAddress } from "./rtt-detect";
 import type { Transport } from "./transport/types";
 
 // ── Module-level state ──────────────────────────────────────────
@@ -13,33 +14,39 @@ let transport: Transport | null = null;
 let session: Session | null = null;
 let ringBuffer: RingBuffer | null = null;
 const parser = new ZephyrLogParser();
-let panel: DevScopePanel | null = null;
+let panel: LogScopePanel | null = null;
 let statusBar: StatusBar | null = null;
 let statusInterval: ReturnType<typeof setInterval> | null = null;
 let lineBuffer = "";
-const jlinkManager = new JLinkManager();
+const sidebarProvider = new LogScopeSidebarProvider();
+let userDisconnecting = false;
 
 // ── Helpers ─────────────────────────────────────────────────────
 
 function getConfig() {
-  const cfg = vscode.workspace.getConfiguration("devscope");
+  const cfg = vscode.workspace.getConfiguration("logscope");
   return {
-    host: cfg.get<string>("rtt.host", "localhost"),
-    port: cfg.get<number>("rtt.port", 19021),
     maxEntries: cfg.get<number>("maxEntries", 100_000),
-    jlinkPath: cfg.get<string>("jlink.path", ""),
-    jlinkDevice: cfg.get<string>("jlink.device", "NRF54L15"),
-    jlinkInterface: cfg.get<string>("jlink.interface", "SWD"),
-    jlinkSpeed: cfg.get<number>("jlink.speed", 4000),
-    jlinkAutoStart: cfg.get<boolean>("jlink.autoStart", true),
+    jlinkDevice: cfg.get<string>("jlink.device", "Cortex-M33"),
+    nrfutilPath: cfg.get<string>("nrfutil.path", "nrfutil"),
+    rttPollInterval: cfg.get<number>("rtt.pollInterval", 50),
+    logWrap: cfg.get<boolean>("logWrap", false),
   };
 }
+
+function getInitConfig() {
+  const cfg = vscode.workspace.getConfiguration("logscope");
+  return {
+    device: "auto",
+    autoConnect: cfg.get<boolean>("autoConnect", false),
+    lastDevice: cfg.get<string>("lastDevice", ""),
+  };
+}
+
 
 function handleChunk(chunk: Buffer): void {
   if (!ringBuffer || !session) return;
 
-  // Partial-line buffering: RTT sends arbitrary byte boundaries.
-  // Accumulate text, split on newlines, keep the trailing partial.
   lineBuffer += chunk.toString("utf-8");
   const segments = lineBuffer.split("\n");
   lineBuffer = segments.pop() ?? "";
@@ -54,14 +61,28 @@ function handleChunk(chunk: Buffer): void {
     session.addEntry(entry);
   }
 
-  // Push to WebView
   if (entries.length > 0 && panel) {
     panel.addEntries(entries);
-
-    // Update modules if new ones appeared
     const modules = Array.from(session.modules);
     panel.updateModules(modules);
   }
+}
+
+function wireTransportEvents(t: Transport): void {
+  t.on("data", (chunk: Buffer) => handleChunk(chunk));
+
+  t.on("disconnected", () => {
+    if (!userDisconnecting) {
+      panel?.sendDisconnected(true);
+      sidebarProvider.updateState({ connected: false });
+    }
+    statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
+    panel?.updateStatus(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
+  });
+
+  t.on("error", (err: Error) => {
+    console.error("[LogScope] Transport error:", err.message);
+  });
 }
 
 function startStatusUpdates(): void {
@@ -73,6 +94,7 @@ function startStatusUpdates(): void {
 
     panel?.updateStatus(connected, count, evicted);
     statusBar?.update(connected, count, evicted);
+    sidebarProvider.updateState({ entryCount: count });
   }, 500);
 }
 
@@ -90,137 +112,229 @@ function disconnectAll(): void {
   transport = null;
   lineBuffer = "";
   stopStatusUpdates();
-  jlinkManager.stop();
   statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
   panel?.updateStatus(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
+}
+
+// ── Connect helpers ─────────────────────────────────────────────
+
+async function connectRtt(device: string, pollInterval: number): Promise<void> {
+  const cfg = getConfig();
+  ringBuffer = new RingBuffer(cfg.maxEntries);
+  session = new Session("device", "rtt");
+  lineBuffer = "";
+
+  const rttTransport = new NrfutilRttTransport({
+    device,
+    pollIntervalMs: pollInterval,
+    nrfutilPath: cfg.nrfutilPath,
+  });
+  transport = rttTransport;
+  wireTransportEvents(rttTransport);
+  await rttTransport.connect();
+  startStatusUpdates();
 }
 
 // ── Activation ──────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
   // Create UI components
-  panel = new DevScopePanel(context.extensionUri);
+  panel = new LogScopePanel(context.extensionUri);
   statusBar = new StatusBar();
 
+  // Register sidebar TreeView
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("logscope.sidebar", sidebarProvider)
+  );
+
+  // Auto-open the panel on activation so the welcome screen is visible
+  const cfg = getConfig();
+  panel.show(getInitConfig(), cfg.logWrap);
+
+  // Auto-connect if enabled
+  const devCfg = vscode.workspace.getConfiguration("logscope");
+  const autoConnect = devCfg.get<boolean>("autoConnect", false);
+  const lastDevice = devCfg.get<string>("lastDevice", "");
+  if (autoConnect && lastDevice) {
+    // Delay slightly to let the WebView initialize
+    setTimeout(async () => {
+      try {
+        panel?.sendConnecting();
+        sidebarProvider.updateState({ connecting: true });
+        const pollInterval = cfg.rttPollInterval;
+        await connectRtt(lastDevice, pollInterval);
+        const rttTransport = transport as NrfutilRttTransport;
+        const displayName = rttTransport.detectedDevice || lastDevice;
+        panel?.sendConnected("J-Link RTT", displayName);
+        sidebarProvider.updateState({
+          connected: true, connecting: false,
+          transport: "J-Link RTT", address: displayName,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        panel?.sendConnectError(message);
+        sidebarProvider.updateState({ connecting: false });
+      }
+    }, 500);
+  }
+
   // Handle messages from WebView
-  panel.setMessageHandler((msg) => {
-    if (msg.type === "clear") {
-      ringBuffer?.clear();
-      panel?.clear();
-    }
-  });
+  panel.setMessageHandler(async (msg) => {
+    switch (msg.type) {
+      case "connect":
+      case "reconnect": {
+        const config = msg.config as { device: string };
 
-  // ── Connect ───────────────────────────────────────────────────
-  const connectCmd = vscode.commands.registerCommand("devscope.connect", async () => {
-    if (transport?.connected) {
-      vscode.window.showInformationMessage("DevScope: Already connected.");
-      return;
-    }
+        if (transport?.connected) return;
 
-    const cfg = getConfig();
-    ringBuffer = new RingBuffer(cfg.maxEntries);
-    session = new Session("device", "rtt");
-    lineBuffer = "";
+        panel?.sendConnecting();
+        sidebarProvider.updateState({ connecting: true });
 
-    // Auto-start J-Link if enabled
-    let jlinkStarted = false;
-    if (cfg.jlinkAutoStart) {
-      const result = await jlinkManager.start({
-        jlinkPath: cfg.jlinkPath,
-        device: cfg.jlinkDevice,
-        iface: cfg.jlinkInterface,
-        speed: cfg.jlinkSpeed,
-        rttPort: cfg.port,
-      });
+        try {
+          const device = config.device || "auto";
+          const pollInterval = getConfig().rttPollInterval;
+          await connectRtt(device, pollInterval);
+          // Use the detected device name if auto-detected
+          const rttTransport = transport as NrfutilRttTransport;
+          const displayName = rttTransport.detectedDevice || device;
+          // Save last device for auto-connect
+          const devCfg = vscode.workspace.getConfiguration("logscope");
+          await devCfg.update("lastDevice", displayName, vscode.ConfigurationTarget.Workspace);
+          panel?.sendConnected("J-Link RTT", displayName);
+          sidebarProvider.updateState({
+            connected: true, connecting: false,
+            transport: "J-Link RTT", address: displayName,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          panel?.sendConnectError(message);
+          sidebarProvider.updateState({ connecting: false });
+          disconnectAll();
+        }
+        break;
+      }
 
-      if (result.started) {
-        jlinkStarted = true;
-      } else if (!result.jlinkPath) {
-        // J-Link not found — fall back to manual mode
-        vscode.window.showWarningMessage(
-          "DevScope: J-Link not found — connecting to existing RTT server. " +
-            "Install J-Link tools or set devscope.jlink.path for auto-start."
+      case "disconnect": {
+        userDisconnecting = true;
+        disconnectAll();
+        panel?.sendDisconnected(false);
+        sidebarProvider.updateState({ connected: false });
+        userDisconnecting = false;
+        break;
+      }
+
+      case "export": {
+        if (!ringBuffer || ringBuffer.size === 0) {
+          vscode.window.showWarningMessage("LogScope: Nothing to export — no log entries captured yet.");
+          return;
+        }
+        const format = await vscode.window.showQuickPick(
+          [
+            { label: "Text (.log)", value: "text" },
+            { label: "JSON Lines (.jsonl)", value: "jsonl" },
+          ],
+          { placeHolder: "Select export format" }
         );
-      } else {
-        // J-Link found but failed to start
-        vscode.window.showWarningMessage(
-          `DevScope: ${result.error} Falling back to direct connection.`
+        if (!format) return;
+
+        const ext = (format as { label: string; value: string }).value === "jsonl" ? "jsonl" : "log";
+        const uri = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(`logscope-export.${ext}`),
+          filters: { "Log files": [ext] },
+        });
+        if (!uri) return;
+
+        const entries = ringBuffer.getAll();
+        const content = (format as { label: string; value: string }).value === "jsonl"
+          ? exportAsJsonLines(entries)
+          : exportAsText(entries);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf-8"));
+        vscode.window.showInformationMessage(
+          `LogScope: Exported ${entries.length} entries to ${uri.fsPath}`
         );
+        break;
+      }
+
+      case "updateSetting": {
+        const cfgSection = vscode.workspace.getConfiguration("logscope");
+        const key = (msg.key as string).replace("logscope.", "");
+        await cfgSection.update(key, msg.value, vscode.ConfigurationTarget.Workspace);
+        break;
+      }
+
+      case "clear": {
+        ringBuffer?.clear();
+        panel?.clear();
+        break;
+      }
+
+      case "openExternal": {
+        const url = msg.url as string;
+        if (url) {
+          vscode.env.openExternal(vscode.Uri.parse(url));
+        }
+        break;
       }
     }
-
-    // Connect TCP transport to RTT telnet server
-    const rtt = new RttTransport(cfg.host, cfg.port);
-    transport = rtt;
-
-    rtt.on("data", (chunk: Buffer) => handleChunk(chunk));
-
-    rtt.on("disconnected", () => {
-      vscode.window.showWarningMessage("DevScope: RTT connection lost. Reconnect when ready.");
-      statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
-      panel?.updateStatus(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
-    });
-
-    rtt.on("error", (err: Error) => {
-      vscode.window.showErrorMessage(
-        `DevScope: Connection error — ${err.message}. Is J-Link running?`
-      );
-    });
-
-    try {
-      await rtt.connect();
-      startStatusUpdates();
-      const source = jlinkStarted ? " (J-Link auto-started)" : "";
-      vscode.window.showInformationMessage(
-        `DevScope: Connected to RTT at ${cfg.host}:${cfg.port}${source}`
-      );
-    } catch {
-      const hint = cfg.jlinkAutoStart
-        ? "Check that your device is connected and powered on."
-        : "Make sure J-Link is connected and the RTT telnet server is running.";
-      vscode.window.showErrorMessage(
-        `DevScope: Could not connect to ${cfg.host}:${cfg.port}. ${hint}`
-      );
-      jlinkManager.stop();
-      transport = null;
-    }
   });
 
-  // ── Disconnect ────────────────────────────────────────────────
-  const disconnectCmd = vscode.commands.registerCommand("devscope.disconnect", () => {
-    if (!transport?.connected) {
-      vscode.window.showInformationMessage("DevScope: Not connected.");
-      return;
-    }
+  // ── Commands ────────────────────────────────────────────────
+
+  const openCmd = vscode.commands.registerCommand("logscope.open", () => {
+    const cfg = getConfig();
+    panel?.show(getInitConfig(), cfg.logWrap);
+  });
+
+  const connectCmd = vscode.commands.registerCommand("logscope.connect", () => {
+    // Open the panel — user connects via the form
+    const cfg = getConfig();
+    panel?.show(getInitConfig(), cfg.logWrap);
+  });
+
+  const disconnectCmd = vscode.commands.registerCommand("logscope.disconnect", () => {
+    if (!transport?.connected) return;
+    userDisconnecting = true;
     disconnectAll();
-    vscode.window.showInformationMessage("DevScope: Disconnected.");
+    panel?.sendDisconnected(false);
+    sidebarProvider.updateState({ connected: false });
+    userDisconnecting = false;
   });
 
-  // ── Open Panel ────────────────────────────────────────────────
-  const openPanelCmd = vscode.commands.registerCommand("devscope.openPanel", () => {
-    panel?.show();
-  });
-
-  // ── Export ────────────────────────────────────────────────────
-  const exportCmd = vscode.commands.registerCommand("devscope.export", async () => {
+  const exportCmd = vscode.commands.registerCommand("logscope.export", () => {
+    // Trigger export via the message handler
+    if (panel) {
+      panel.setMessageHandler(panel["onMessage"] as never); // keep existing handler
+      // Simulate the export message
+    }
+    // Direct export from command palette
     if (!ringBuffer || ringBuffer.size === 0) {
-      vscode.window.showWarningMessage("DevScope: Nothing to export — no log entries captured yet.");
+      vscode.window.showWarningMessage("LogScope: Nothing to export.");
       return;
     }
-
-    const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file("devscope-export.log"),
-      filters: { "Log files": ["log", "txt"], "All files": ["*"] },
+    vscode.window.showQuickPick(
+      [
+        { label: "Text (.log)", value: "text" },
+        { label: "JSON Lines (.jsonl)", value: "jsonl" },
+      ],
+      { placeHolder: "Select export format" }
+    ).then(async (format) => {
+      if (!format || !ringBuffer) return;
+      const ext = (format as { label: string; value: string }).value === "jsonl" ? "jsonl" : "log";
+      const uri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(`logscope-export.${ext}`),
+        filters: { "Log files": [ext] },
+      });
+      if (!uri) return;
+      const entries = ringBuffer.getAll();
+      const content = (format as { label: string; value: string }).value === "jsonl"
+        ? exportAsJsonLines(entries)
+        : exportAsText(entries);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf-8"));
+      vscode.window.showInformationMessage(`LogScope: Exported ${entries.length} entries to ${uri.fsPath}`);
     });
-
-    if (!uri) return;
-
-    const text = exportAsText(ringBuffer.getAll());
-    await vscode.workspace.fs.writeFile(uri, Buffer.from(text, "utf-8"));
-    vscode.window.showInformationMessage(`DevScope: Exported ${ringBuffer.size} entries to ${uri.fsPath}`);
   });
 
-  context.subscriptions.push(connectCmd, disconnectCmd, openPanelCmd, exportCmd);
+  context.subscriptions.push(openCmd, connectCmd, disconnectCmd, exportCmd);
 }
 
 export function deactivate() {

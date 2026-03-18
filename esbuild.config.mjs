@@ -31,6 +31,8 @@ function copyAssets() {
   mkdirSync("out/webview", { recursive: true });
   copyFileSync("src/ui/webview/styles.css", "out/webview/styles.css");
   copyFileSync("src/ui/webview/index.html", "out/webview/index.html");
+  // RTT helper script (runs as subprocess, not bundled into JS)
+  copyFileSync("src/transport/rtt-helper.py", "out/rtt-helper.py");
 }
 
 if (isWatch) {

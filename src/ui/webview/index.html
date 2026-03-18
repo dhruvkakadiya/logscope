@@ -5,44 +5,157 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';"
+    content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}'; img-src {{cspSource}};"
   />
   <link rel="stylesheet" href="{{stylesUri}}" />
-  <title>DevScope</title>
+  <title>LogScope</title>
 </head>
 <body>
-  <!-- ── Filter bar ──────────────────────────────────────────── -->
-  <div id="filter-bar">
-    <div id="severity-toggles">
-      <button class="severity-btn active" data-severity="err">ERR</button>
-      <button class="severity-btn active" data-severity="wrn">WRN</button>
-      <button class="severity-btn active" data-severity="inf">INF</button>
-      <button class="severity-btn active" data-severity="dbg">DBG</button>
+
+  <!-- ── State 1: Disconnected (Welcome/Setup) ─────────────── -->
+  <div id="welcome" class="state">
+    <div id="welcome-inner">
+      <div id="welcome-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="18" rx="2" />
+          <path d="M5 12 Q7 4, 9 12 Q11 20, 13 12 Q15 4, 17 12 L19 12" />
+        </svg>
+      </div>
+      <h1>LogScope<sup class="tm">TM</sup></h1>
+      <p class="subtitle">Real-Time Embedded Log Viewer</p>
+
+      <div id="connect-form">
+        <label>
+          Device
+          <select id="cfg-device">
+              <option value="auto">Auto-detect</option>
+              <optgroup label="Nordic Semiconductor">
+                <option value="NRF54L15_M33">nRF54L15</option>
+                <option value="NRF54H20_M33">nRF54H20</option>
+                <option value="NRF5340_XXAA_APP">nRF5340 (App Core)</option>
+                <option value="NRF5340_XXAA_NET">nRF5340 (Net Core)</option>
+                <option value="NRF52840_XXAA">nRF52840</option>
+                <option value="NRF52833_XXAA">nRF52833</option>
+                <option value="NRF52832_XXAA">nRF52832</option>
+                <option value="NRF9160_XXAA">nRF9160</option>
+                <option value="NRF9161_XXAA">nRF9161</option>
+              </optgroup>
+              <optgroup label="STMicroelectronics">
+                <option value="STM32F407VG">STM32F407</option>
+                <option value="STM32L476RG">STM32L476</option>
+                <option value="STM32H743ZI">STM32H743</option>
+                <option value="STM32WB55RG">STM32WB55</option>
+                <option value="STM32U585AI">STM32U585</option>
+              </optgroup>
+              <optgroup label="Infineon">
+                <option value="CY8C6247BZI_D54">PSoC 6 (CY8C6247)</option>
+                <option value="XMC4500_1024">XMC4500</option>
+              </optgroup>
+              <optgroup label="Silicon Labs">
+                <option value="EFR32BG22C224F512">EFR32BG22</option>
+                <option value="EFR32MG24B220F1536">EFR32MG24</option>
+              </optgroup>
+              <optgroup label="NXP">
+                <option value="LPC55S69_M33_0">LPC55S69</option>
+                <option value="MIMXRT1062xxx5B">i.MX RT1060</option>
+              </optgroup>
+              <optgroup label="Generic">
+                <option value="Cortex-M33">Cortex-M33</option>
+                <option value="Cortex-M4">Cortex-M4</option>
+                <option value="Cortex-M7">Cortex-M7</option>
+                <option value="Cortex-M0+">Cortex-M0+</option>
+              </optgroup>
+            </select>
+          </label>
+          <span class="form-hint">Connects via J-Link RTT</span>
+
+        <div id="connect-error" class="hidden"></div>
+
+        <label id="auto-connect-label">
+          <input id="cfg-auto-connect" type="checkbox" />
+          Connect automatically on open
+        </label>
+
+        <button id="connect-btn">Connect</button>
+      </div>
+
+      <div id="welcome-footer">
+        <a id="novelbits-link" href="#">
+          <img src="{{logoUri}}" alt="Novel Bits" height="40" />
+          <span>by Novel Bits</span>
+        </a>
+      </div>
     </div>
-
-    <select id="module-select">
-      <option value="">All modules</option>
-    </select>
-
-    <input
-      id="search-input"
-      type="text"
-      placeholder="Search logs..."
-      spellcheck="false"
-    />
-
-    <button id="auto-scroll-btn" class="active" title="Auto-scroll">&#x2193; Auto</button>
-    <button id="clear-btn" title="Clear timeline">Clear</button>
   </div>
 
-  <!-- ── Timeline ────────────────────────────────────────────── -->
-  <div id="timeline"></div>
+  <!-- ── State 2: Connected (Log Viewer) ───────────────────── -->
+  <div id="viewer" class="state hidden">
 
-  <!-- ── Status bar ──────────────────────────────────────────── -->
-  <div id="status-bar">
-    <span id="status-connection">Disconnected</span>
-    <span id="status-count">0 entries</span>
-    <span id="status-evicted"></span>
+    <!-- Connection bar -->
+    <div id="connection-bar">
+      <span id="conn-status">
+        <span class="dot green"></span>
+        <span id="conn-label">Connected</span>
+      </span>
+      <div id="conn-actions">
+        <button id="export-btn" class="conn-btn" title="Export logs">Export</button>
+        <button id="settings-btn" class="conn-btn" title="Settings (click again to collapse)">Settings</button>
+        <button id="disconnect-btn" class="conn-btn disconnect" title="Disconnect">Disconnect</button>
+      </div>
+    </div>
+
+    <!-- Inline settings (toggled by gear icon) -->
+    <div id="inline-settings" class="hidden">
+      <div id="inline-settings-inner">
+        <label>
+          RTT Address (override)
+          <input id="cfg-rtt-address-inline" type="text" placeholder="auto" spellcheck="false" />
+        </label>
+        <span class="hint">Leave empty for auto-detect. Changes take effect on next reconnect.</span>
+      </div>
+    </div>
+
+    <!-- Reconnect bar (unexpected disconnect) -->
+    <div id="reconnect-bar" class="hidden">
+      <span class="dot amber"></span>
+      <span>Connection lost</span>
+      <button id="reconnect-btn">Reconnect</button>
+      <button id="dismiss-btn">Dismiss</button>
+    </div>
+
+    <!-- Filter bar -->
+    <div id="filter-bar">
+      <div id="filter-left">
+        <button id="timestamp-btn" class="filter-toggle active" title="Show/hide timestamps">Time</button>
+        <div id="severity-toggles">
+          <button class="severity-btn active" data-severity="err">ERR</button>
+          <button class="severity-btn active" data-severity="wrn">WRN</button>
+          <button class="severity-btn active" data-severity="inf">INF</button>
+          <button class="severity-btn active" data-severity="dbg">DBG</button>
+        </div>
+        <select id="module-select">
+          <option value="">All modules</option>
+        </select>
+      </div>
+
+      <input id="search-input" type="text" placeholder="Search logs..." spellcheck="false" />
+
+      <div id="filter-right">
+        <button id="wrap-btn" class="filter-toggle" title="Toggle line wrap">Wrap</button>
+        <button id="auto-scroll-btn" class="filter-toggle active" title="Auto-scroll">Auto &#x2193;</button>
+        <button id="clear-btn" class="filter-toggle" title="Clear timeline">Clear</button>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div id="timeline"></div>
+
+    <!-- Status bar -->
+    <div id="status-bar">
+      <span id="status-connection">Connected</span>
+      <span id="status-count">0 entries</span>
+      <span id="status-evicted"></span>
+    </div>
   </div>
 
   <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
