@@ -45,7 +45,7 @@ const timestampBtn = document.getElementById("timestamp-btn")!;
 // ── State ───────────────────────────────────────────────────────
 let autoScroll = true;
 let timestampsVisible = true;
-const activeSeverities = new Set(["err", "wrn", "inf", "dbg"]);
+const activeSeverities = new Set(["hci", "err", "wrn", "inf", "dbg"]);
 let selectedModule = ""; // "" means all modules
 let searchText = "";
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,7 +79,8 @@ function formatTimestamp(us: number): string {
 // ── Row creation (XSS-safe: uses textContent, never innerHTML) ──
 function createRow(entry: SerializedEntry): HTMLDivElement {
   const row = document.createElement("div");
-  row.className = `log-row ${entry.severity}`;
+  const cssClass = entry.source === "hci" ? "hci" : entry.severity;
+  row.className = `log-row ${cssClass}`;
 
   const ts = document.createElement("span");
   ts.className = "ts";
@@ -107,7 +108,10 @@ function createRow(entry: SerializedEntry): HTMLDivElement {
 
 // ── Visibility check ────────────────────────────────────────────
 function shouldShow(entry: SerializedEntry): boolean {
-  if (!activeSeverities.has(entry.severity)) return false;
+  // HCI entries: check if "hci" toggle is active
+  if (entry.source === "hci" && !activeSeverities.has("hci")) return false;
+  // Log entries: check severity toggle
+  if (entry.source !== "hci" && !activeSeverities.has(entry.severity)) return false;
   if (selectedModule && entry.module !== selectedModule) return false;
   if (searchText) {
     const lower = searchText.toLowerCase();
@@ -184,9 +188,10 @@ timestampBtn.addEventListener("click", () => {
 });
 
 // ── Auto-disable auto-scroll when user scrolls up ──────────────
+let programmaticScroll = false;
 timeline.addEventListener("scroll", () => {
-  if (!autoScroll) return;
-  const atBottom = timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 20;
+  if (!autoScroll || programmaticScroll) return;
+  const atBottom = timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 30;
   if (!atBottom) {
     autoScroll = false;
     autoScrollBtn.classList.remove("active");
@@ -241,7 +246,20 @@ autoScrollBtn.addEventListener("click", () => {
   autoScroll = !autoScroll;
   autoScrollBtn.classList.toggle("active", autoScroll);
   if (autoScroll) {
+    programmaticScroll = true;
     timeline.scrollTop = timeline.scrollHeight;
+    requestAnimationFrame(() => { programmaticScroll = false; });
+  }
+});
+
+// Right-click copy on log rows
+timeline.addEventListener("contextmenu", (e: Event) => {
+  const mouseEvent = e as MouseEvent;
+  const target = (mouseEvent.target as HTMLElement).closest(".log-row") as HTMLElement | null;
+  if (target) {
+    e.preventDefault();
+    const text = target.textContent ?? "";
+    navigator.clipboard.writeText(text.trim());
   }
 });
 
@@ -277,10 +295,11 @@ window.addEventListener("message", (event) => {
     case "init": {
       const { config, wrapEnabled: wrap } = msg;
       if (config) {
-        if (config.lastDevice) {
-          cfgDevice.value = config.lastDevice;
-        } else if (config.device) {
-          cfgDevice.value = config.device;
+        // Try to set the device dropdown — fall back to "auto" if no match
+        const targetDevice = config.lastDevice || config.device || "auto";
+        cfgDevice.value = targetDevice;
+        if (!cfgDevice.value || cfgDevice.value !== targetDevice) {
+          cfgDevice.value = "auto";
         }
         cfgAutoConnect.checked = config.autoConnect ?? false;
       }
@@ -349,7 +368,9 @@ window.addEventListener("message", (event) => {
       timeline.appendChild(fragment);
 
       if (autoScroll) {
+        programmaticScroll = true;
         timeline.scrollTop = timeline.scrollHeight;
+        requestAnimationFrame(() => { programmaticScroll = false; });
       }
       break;
     }

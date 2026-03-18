@@ -152,9 +152,30 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
         }
       });
 
+      // Parse framed stdout: [channel:1][length:4 LE][data:N]
+      let frameBuf = Buffer.alloc(0);
       proc.stdout!.on("data", (chunk: Buffer) => {
-        if (this._connected) {
-          this.emit("data", chunk);
+        if (!this._connected) return;
+        frameBuf = Buffer.concat([frameBuf, chunk]);
+
+        while (frameBuf.length >= 5) {
+          const channel = frameBuf[0];
+          const length = frameBuf.readUInt32LE(1);
+          if (frameBuf.length < 5 + length) break;
+
+          const payload = frameBuf.subarray(5, 5 + length);
+          frameBuf = frameBuf.subarray(5 + length);
+
+          if (channel === 0) {
+            this.emit("data", payload);
+          } else if (channel === 1) {
+            this.emit("hci", payload);
+          }
+        }
+
+        // Prevent unbounded growth on corrupt frames
+        if (frameBuf.length > 131072) {
+          frameBuf = Buffer.alloc(0);
         }
       });
 

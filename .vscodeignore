@@ -4,6 +4,7 @@ test/**
 node_modules/**
 .venv/**
 build/**
+build-hci/**
 samples/**
 docs/superpowers/**
 .superpowers/**

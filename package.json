@@ -2,8 +2,8 @@
   "name": "logscope",
   "displayName": "LogScope",
   "description": "Modern embedded log viewer — Zephyr logs with filtering, search, and color-coding",
-  "version": "0.1.1",
-  "publisher": "Novel-Bits",
+  "version": "0.1.0",
+  "publisher": "Novel Bits",
   "author": {
     "name": "Novel Bits"
   },

@@ -57,19 +57,33 @@ def run_pylink(device_or_addr, poll_ms):
         sys.exit(2)
 
     num_up = jlink.rtt_get_num_up_buffers()
-    print(f"RTT_READY buffers={num_up}", file=sys.stderr)
+    has_hci = num_up >= 2
+    print(f"RTT_READY buffers={num_up} hci={'yes' if has_hci else 'no'}", file=sys.stderr)
     sys.stderr.flush()
 
     stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
     poll_interval = poll_ms / 1000.0
     errors = 0
 
+    def write_frame(channel, data):
+        """Write framed data: [channel:1][length:4 LE][data:N]"""
+        stdout.write(bytes([channel]) + struct.pack('<I', len(data)) + data)
+
     while True:
         try:
-            data = jlink.rtt_read(0, 4096)  # Channel 0, up to 4KB per read
+            # Channel 0: log text
+            data = jlink.rtt_read(0, 4096)
             if data:
-                stdout.write(bytes(data))
+                write_frame(0, bytes(data))
                 errors = 0
+
+            # Channel 1: HCI binary (BT Monitor)
+            if has_hci:
+                hci_data = jlink.rtt_read(1, 4096)
+                if hci_data:
+                    write_frame(1, bytes(hci_data))
+                    errors = 0
+
         except BrokenPipeError:
             break
         except Exception as e:
@@ -224,7 +238,7 @@ def main():
         sys.exit(1)
 
     device_or_addr = sys.argv[1]
-    poll_ms = int(sys.argv[2]) if len(sys.argv) > 2 else 50
+    poll_ms = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     nrfutil_path = sys.argv[3] if len(sys.argv) > 3 else "nrfutil"
 
     # Auto-detect device if requested

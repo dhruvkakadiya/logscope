@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { NrfutilRttTransport } from "./transport/nrfutil-rtt";
 import { ZephyrLogParser } from "./parser/zephyr-log";
+import { HciParser } from "./parser/hci-parser";
 import { RingBuffer } from "./model/ring-buffer";
 import { Session, exportAsText, exportAsJsonLines } from "./model/session";
 import { LogScopePanel } from "./ui/webview-provider";
@@ -14,6 +15,7 @@ let transport: Transport | null = null;
 let session: Session | null = null;
 let ringBuffer: RingBuffer | null = null;
 const parser = new ZephyrLogParser();
+const hciParser = new HciParser();
 let panel: LogScopePanel | null = null;
 let statusBar: StatusBar | null = null;
 let statusInterval: ReturnType<typeof setInterval> | null = null;
@@ -70,6 +72,20 @@ function handleChunk(chunk: Buffer): void {
 
 function wireTransportEvents(t: Transport): void {
   t.on("data", (chunk: Buffer) => handleChunk(chunk));
+
+  t.on("hci", (chunk: Buffer) => {
+    if (!ringBuffer || !session) return;
+    const entries = hciParser.parse(chunk);
+    for (const entry of entries) {
+      ringBuffer.push(entry);
+      session.addEntry(entry);
+    }
+    if (entries.length > 0 && panel) {
+      panel.addEntries(entries);
+      const modules = Array.from(session.modules);
+      panel.updateModules(modules);
+    }
+  });
 
   t.on("disconnected", () => {
     if (!userDisconnecting) {
@@ -151,11 +167,12 @@ export function activate(context: vscode.ExtensionContext) {
   const cfg = getConfig();
   panel.show(getInitConfig(), cfg.logWrap);
 
-  // Auto-connect if enabled
+  // Auto-connect if enabled AND a previous successful connection exists
+  // The "lastDevice" is only set after a successful connect, so empty means never connected
   const devCfg = vscode.workspace.getConfiguration("logscope");
   const autoConnect = devCfg.get<boolean>("autoConnect", false);
   const lastDevice = devCfg.get<string>("lastDevice", "");
-  if (autoConnect && lastDevice) {
+  if (autoConnect && lastDevice && lastDevice !== "auto") {
     // Delay slightly to let the WebView initialize
     setTimeout(async () => {
       try {
@@ -239,7 +256,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         const ext = (format as { label: string; value: string }).value === "jsonl" ? "jsonl" : "log";
         const uri = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(`logscope-export.${ext}`),
+          defaultUri: vscode.Uri.file(`logscope-${new Date().toISOString().slice(0,19).replace(/[T:]/g, "-")}.${ext}`),
           filters: { "Log files": [ext] },
         });
         if (!uri) return;
@@ -321,7 +338,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!format || !ringBuffer) return;
       const ext = (format as { label: string; value: string }).value === "jsonl" ? "jsonl" : "log";
       const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(`logscope-export.${ext}`),
+        defaultUri: vscode.Uri.file(`logscope-${new Date().toISOString().slice(0,19).replace(/[T:]/g, "-")}.${ext}`),
         filters: { "Log files": [ext] },
       });
       if (!uri) return;
