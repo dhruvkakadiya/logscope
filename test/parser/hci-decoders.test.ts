@@ -240,8 +240,8 @@ describe("decodeAcl", () => {
       "0x0015"
     );
     expect(
-      result!.fields.find((f) => f.name === "Value Length")?.value
-    ).toBe("2 bytes");
+      result!.fields.find((f) => f.name === "Value")?.value
+    ).toBe("01 00");
   });
 
   it("decodes ATT Exchange MTU Request", () => {

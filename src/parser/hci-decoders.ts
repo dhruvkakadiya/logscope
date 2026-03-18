@@ -408,10 +408,16 @@ export function decodeAcl(payload: Buffer): DecodedPacket | null {
 
     // Read Response
     case 0x0b: {
-      const dataBytes = payload.length - 9;
-      fields.push(field("Data Length", `${dataBytes} bytes`));
+      const respData = payload.subarray(9);
+      const respHex = Array.from(respData).map(b => b.toString(16).padStart(2, "0")).join(" ");
+      // Try to show as UTF-8 if it looks like text
+      let respDisplay = respHex;
+      if (respData.length > 0 && respData.every(b => b >= 0x20 && b <= 0x7e)) {
+        respDisplay = `"${Buffer.from(respData).toString("utf-8")}" (${respHex})`;
+      }
+      fields.push(field("Data", respDisplay || "(empty)"));
       return {
-        summary: `handle:${handleStr} ATT Read Response (${dataBytes} bytes)`,
+        summary: `handle:${handleStr} ATT Read Response (${respData.length} bytes)`,
         fields,
       };
     }
@@ -419,12 +425,13 @@ export function decodeAcl(payload: Buffer): DecodedPacket | null {
     // Write Request
     case 0x12: {
       if (payload.length < 11) break;
-      const attHandle = payload.readUInt16LE(9);
-      const valueLen = payload.length - 11;
-      fields.push(field("ATT Handle", fmtHandle(attHandle)));
-      fields.push(field("Value Length", `${valueLen} bytes`));
+      const attHandle12 = payload.readUInt16LE(9);
+      const value12 = payload.subarray(11);
+      const valueHex12 = Array.from(value12).map(b => b.toString(16).padStart(2, "0")).join(" ");
+      fields.push(field("ATT Handle", fmtHandle(attHandle12)));
+      fields.push(field("Value", valueHex12 || "(empty)"));
       return {
-        summary: `handle:${handleStr} ATT Write Request (handle: ${fmtHandle(attHandle)})`,
+        summary: `handle:${handleStr} ATT Write Request (handle: ${fmtHandle(attHandle12)})`,
         fields,
       };
     }
@@ -432,12 +439,13 @@ export function decodeAcl(payload: Buffer): DecodedPacket | null {
     // Write Command
     case 0x52: {
       if (payload.length < 11) break;
-      const attHandle = payload.readUInt16LE(9);
-      const valueLen = payload.length - 11;
-      fields.push(field("ATT Handle", fmtHandle(attHandle)));
-      fields.push(field("Value Length", `${valueLen} bytes`));
+      const attHandle52 = payload.readUInt16LE(9);
+      const value52 = payload.subarray(11);
+      const valueHex52 = Array.from(value52).map(b => b.toString(16).padStart(2, "0")).join(" ");
+      fields.push(field("ATT Handle", fmtHandle(attHandle52)));
+      fields.push(field("Value", valueHex52 || "(empty)"));
       return {
-        summary: `handle:${handleStr} ATT Write Command (handle: ${fmtHandle(attHandle)})`,
+        summary: `handle:${handleStr} ATT Write Command (handle: ${fmtHandle(attHandle52)})`,
         fields,
       };
     }
@@ -445,10 +453,13 @@ export function decodeAcl(payload: Buffer): DecodedPacket | null {
     // Handle Value Notification
     case 0x1b: {
       if (payload.length < 11) break;
-      const attHandle = payload.readUInt16LE(9);
-      fields.push(field("ATT Handle", fmtHandle(attHandle)));
+      const attHandle1b = payload.readUInt16LE(9);
+      const value1b = payload.subarray(11);
+      const valueHex1b = Array.from(value1b).map(b => b.toString(16).padStart(2, "0")).join(" ");
+      fields.push(field("ATT Handle", fmtHandle(attHandle1b)));
+      fields.push(field("Value", valueHex1b || "(empty)"));
       return {
-        summary: `handle:${handleStr} ATT Notification (handle: ${fmtHandle(attHandle)})`,
+        summary: `handle:${handleStr} ATT Notification (handle: ${fmtHandle(attHandle1b)})`,
         fields,
       };
     }

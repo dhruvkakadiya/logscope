@@ -337,7 +337,7 @@ body { display: flex; flex-direction: column; }
 
 /* End of log indicator — last element inside scrollable timeline */
 #end-of-log {
-  text-align: center; padding: 12px 0 16px;
+  text-align: center; padding: 4px 0 6px;
   font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
   color: var(--vscode-descriptionForeground); opacity: 0.2;
 }
