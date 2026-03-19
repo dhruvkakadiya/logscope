@@ -19,6 +19,14 @@ def run_pylink(device_or_addr, poll_ms):
     import pylink
 
     jlink = pylink.JLink()
+
+    # Check for connected probes BEFORE opening — otherwise the J-Link SDK
+    # pops up a native dialog asking about TCP/IP connection.
+    if not jlink.connected_emulators():
+        print("ERROR: No J-Link probes found. Connect a device via USB and try again.", file=sys.stderr)
+        sys.stderr.flush()
+        sys.exit(3)
+
     jlink.open()
 
     # If it looks like a hex address, it's the nrfutil fallback format.
