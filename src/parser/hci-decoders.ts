@@ -25,6 +25,14 @@ function field(name: string, value: string, color?: string): DecodedField {
   return color ? { name, value, color } : { name, value };
 }
 
+/** Format raw bytes as hex + ASCII (e.g., "01 00 48 65  ..He") */
+function formatValueBytes(bytes: Uint8Array | Buffer): string {
+  if (bytes.length === 0) return "(empty)";
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join(" ");
+  const ascii = Array.from(bytes).map(b => b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ".").join("");
+  return `${hex}  ${ascii}`;
+}
+
 /** Format a 16-bit handle as 0xNNNN */
 function fmtHandle(h: number): string {
   return `0x${h.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -661,13 +669,7 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
     // Read Response
     case 0x0b: {
       const respData = payload.subarray(9);
-      const respHex = Array.from(respData).map(b => b.toString(16).padStart(2, "0")).join(" ");
-      // Try to show as UTF-8 if it looks like text
-      let respDisplay = respHex;
-      if (respData.length > 0 && respData.every(b => b >= 0x20 && b <= 0x7e)) {
-        respDisplay = `"${Buffer.from(respData).toString("utf-8")}" (${respHex})`;
-      }
-      fields.push(field("Data", respDisplay || "(empty)"));
+      fields.push(field("Data", formatValueBytes(respData)));
       return {
         summary: `handle:${handleStr} ATT Read Response (${respData.length} bytes)`,
         fields,
@@ -679,9 +681,8 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
       if (payload.length < 11) break;
       const attHandle12 = payload.readUInt16LE(9);
       const value12 = payload.subarray(11);
-      const valueHex12 = Array.from(value12).map(b => b.toString(16).padStart(2, "0")).join(" ");
       fields.push(field("ATT Handle", fmtHandle(attHandle12)));
-      fields.push(field("Value", valueHex12 || "(empty)"));
+      fields.push(field("Value", formatValueBytes(value12)));
       return {
         summary: `handle:${handleStr} ATT Write Request (handle: ${fmtHandle(attHandle12)})`,
         fields,
@@ -693,9 +694,8 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
       if (payload.length < 11) break;
       const attHandle52 = payload.readUInt16LE(9);
       const value52 = payload.subarray(11);
-      const valueHex52 = Array.from(value52).map(b => b.toString(16).padStart(2, "0")).join(" ");
       fields.push(field("ATT Handle", fmtHandle(attHandle52)));
-      fields.push(field("Value", valueHex52 || "(empty)"));
+      fields.push(field("Value", formatValueBytes(value52)));
       return {
         summary: `handle:${handleStr} ATT Write Command (handle: ${fmtHandle(attHandle52)})`,
         fields,
@@ -707,9 +707,8 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
       if (payload.length < 11) break;
       const attHandle1b = payload.readUInt16LE(9);
       const value1b = payload.subarray(11);
-      const valueHex1b = Array.from(value1b).map(b => b.toString(16).padStart(2, "0")).join(" ");
       fields.push(field("ATT Handle", fmtHandle(attHandle1b)));
-      fields.push(field("Value", valueHex1b || "(empty)"));
+      fields.push(field("Value", formatValueBytes(value1b)));
       return {
         summary: `handle:${handleStr} ATT Notification (handle: ${fmtHandle(attHandle1b)})`,
         fields,

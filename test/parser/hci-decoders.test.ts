@@ -243,7 +243,7 @@ describe("decodeAcl", () => {
     );
     expect(
       result!.fields.find((f) => f.name === "Value")?.value
-    ).toBe("01 00");
+    ).toContain("01 00");
   });
 
   it("decodes ATT Exchange MTU Request", () => {
