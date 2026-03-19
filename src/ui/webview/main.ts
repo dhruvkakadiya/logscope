@@ -50,10 +50,13 @@ const connectionBar = document.getElementById("connection-bar")!;
 const inlineSettings = document.getElementById("inline-settings")!;
 const reconnectBar = document.getElementById("reconnect-bar")!;
 const settingsBtn = document.getElementById("settings-btn")!;
-const disconnectBtn = document.getElementById("disconnect-btn")!;
+const connectToggleBtn = document.getElementById("connect-toggle-btn")!;
+const connStatusDot = document.getElementById("conn-status-dot")!;
+const connStatusText = document.getElementById("conn-status-text")!;
 const exportBtn = document.getElementById("export-btn")!;
 const reconnectBtn = document.getElementById("reconnect-btn")!;
 const dismissBtn = document.getElementById("dismiss-btn")!;
+let isConnected = false;
 const wrapBtn = document.getElementById("wrap-btn")!;
 const timestampBtn = document.getElementById("timestamp-btn")!;
 
@@ -381,7 +384,15 @@ connectBtn.addEventListener("click", () => {
 });
 
 // ── Connected state buttons ─────────────────────────────────────
-disconnectBtn.addEventListener("click", () => vscode.postMessage({ type: "disconnect" }));
+connectToggleBtn.addEventListener("click", () => {
+  if (isConnected) {
+    vscode.postMessage({ type: "disconnect" });
+  } else {
+    if (lastConnectConfig) {
+      vscode.postMessage({ type: "reconnect", config: lastConnectConfig });
+    }
+  }
+});
 exportBtn.addEventListener("click", () => vscode.postMessage({ type: "export" }));
 
 reconnectBtn.addEventListener("click", () => {
@@ -594,13 +605,27 @@ window.addEventListener("message", (event) => {
       connectBtn.disabled = true;
       connectBtn.textContent = "Connecting...";
       connectError.classList.add("hidden");
+      // Update connection bar if already in viewer state
+      if (connectToggleBtn) {
+        connectToggleBtn.textContent = "Connecting...";
+        connectToggleBtn.className = "conn-btn";
+        connectToggleBtn.disabled = true;
+        connStatusDot.className = "dot amber";
+        connStatusText.textContent = "Connecting...";
+      }
       break;
     }
 
     case "connected": {
+      isConnected = true;
       connectBtn.disabled = false;
       connectBtn.textContent = "Connect";
-      connDevice.textContent = msg.address;
+      connDevice.textContent = msg.address ? "\u00B7 " + msg.address : "";
+      connStatusDot.className = "dot green";
+      connStatusText.textContent = "Connected via J-Link RTT";
+      connectToggleBtn.textContent = "Disconnect";
+      connectToggleBtn.className = "conn-btn disconnect";
+      (connectToggleBtn as HTMLButtonElement).disabled = false;
       connectionBar.classList.remove("hidden");
       reconnectBar.classList.add("hidden");
       inlineSettings.classList.add("hidden");
@@ -610,20 +635,15 @@ window.addEventListener("message", (event) => {
     }
 
     case "disconnected": {
+      isConnected = false;
       connectBtn.disabled = false;
       connectBtn.textContent = "Connect";
-      // Keep logs visible — show reconnect bar with appropriate message
-      const reconnectText = reconnectBar.querySelector("span:nth-child(2)");
-      const reconnectDot = reconnectBar.querySelector(".dot") as HTMLElement;
-      if (msg.unexpected) {
-        if (reconnectText) reconnectText.textContent = "Connection lost";
-        if (reconnectDot) reconnectDot.className = "dot amber";
-      } else {
-        if (reconnectText) reconnectText.textContent = "Disconnected";
-        if (reconnectDot) reconnectDot.className = "dot";
-      }
-      reconnectBar.classList.remove("hidden");
-      connectionBar.classList.add("hidden");
+      // Keep logs visible — toggle button to Connect state
+      connStatusDot.className = msg.unexpected ? "dot amber" : "dot";
+      connStatusText.textContent = msg.unexpected ? "Connection lost" : "Disconnected";
+      connectToggleBtn.textContent = "Connect";
+      connectToggleBtn.className = "conn-btn connect";
+      (connectToggleBtn as HTMLButtonElement).disabled = false;
       break;
     }
 

@@ -65,17 +65,15 @@
 
     <!-- Connection bar -->
     <div id="connection-bar">
-      <div id="conn-info">
-        <div id="conn-top">
-          <span class="dot green"></span>
-          <span>Connected via J-Link RTT</span>
-        </div>
-        <div id="conn-device"></div>
+      <div id="conn-left">
+        <button id="connect-toggle-btn" class="conn-btn disconnect" title="Disconnect">Disconnect</button>
+        <span id="conn-status-dot" class="dot green"></span>
+        <span id="conn-status-text">Connected via J-Link RTT</span>
+        <span id="conn-device"></span>
       </div>
       <div id="conn-actions">
         <button id="export-btn" class="conn-btn" title="Export logs">Export</button>
-        <button id="settings-btn" class="conn-btn" title="Settings (click again to collapse)">Settings</button>
-        <button id="disconnect-btn" class="conn-btn disconnect" title="Disconnect">Disconnect</button>
+        <button id="settings-btn" class="conn-btn" title="Settings">Settings</button>
       </div>
     </div>
 

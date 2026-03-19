@@ -161,14 +161,14 @@ body { display: flex; flex-direction: column; }
 /* ── Connection bar ─────────────────────────────────────── */
 #connection-bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 10px; flex-shrink: 0; flex-wrap: wrap; gap: 4px;
+  padding: 4px 10px; flex-shrink: 0; gap: 8px;
   background: var(--vscode-sideBar-background, #252526);
   border-bottom: 1px solid var(--vscode-panel-border, #3c3c3c);
   font-size: 12px;
 }
-#conn-info { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-#conn-top { display: flex; align-items: center; }
-#conn-device { font-size: 11px; color: var(--vscode-descriptionForeground); padding-left: 14px; opacity: 0.7; }
+#conn-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#conn-status-text { white-space: nowrap; }
+#conn-device { font-size: 11px; color: var(--vscode-descriptionForeground); opacity: 0.7; white-space: nowrap; }
 #conn-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .conn-btn {
   background: transparent; border: 1px solid var(--vscode-button-border, #555);
@@ -184,6 +184,8 @@ body { display: flex; flex-direction: column; }
 }
 .conn-btn.disconnect { color: var(--vscode-errorForeground, #f44747); border-color: var(--vscode-errorForeground, #f44747); }
 .conn-btn.disconnect:hover { background: rgba(244, 71, 71, 0.1); }
+.conn-btn.connect { color: #2d9d78; border-color: #2d9d78; }
+.conn-btn.connect:hover { background: rgba(45, 157, 120, 0.1); }
 .dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   margin-right: 6px; flex-shrink: 0;
