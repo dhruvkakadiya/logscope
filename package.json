@@ -1,7 +1,7 @@
 {
-  "name": "logscope",
-  "displayName": "LogScope",
-  "description": "Modern embedded log viewer — Zephyr logs with filtering, search, and color-coding",
+  "name": "novelbits-logscope",
+  "displayName": "LogScope — Embedded Log Viewer",
+  "description": "Real-time embedded log viewer with Bluetooth LE HCI decoding — Zephyr logs with filtering, search, fault detection, and Wireshark export",
   "version": "0.1.0",
   "publisher": "novelbits",
   "author": {
@@ -15,6 +15,21 @@
   "categories": [
     "Debuggers",
     "Other"
+  ],
+  "keywords": [
+    "embedded",
+    "zephyr",
+    "bluetooth",
+    "ble",
+    "hci",
+    "rtt",
+    "jlink",
+    "firmware",
+    "logging",
+    "nordic",
+    "nrf",
+    "wireshark",
+    "cortex-m"
   ],
   "activationEvents": [
     "onView:logscope.sidebar"
@@ -160,7 +175,7 @@
     "watch": "node esbuild.config.mjs --watch",
     "test": "jest",
     "package": "npx @vscode/vsce package",
-    "install-ext": "npx @vscode/vsce package && code --install-extension logscope-*.vsix"
+    "install-ext": "npx @vscode/vsce package && code --install-extension novelbits-logscope-*.vsix"
   },
   "repository": {
     "type": "git",
