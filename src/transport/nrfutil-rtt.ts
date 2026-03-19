@@ -9,6 +9,16 @@ import type { Transport } from "./types";
 const LOGSCOPE_VENV_DIR = path.join(os.homedir(), ".logscope", "venv");
 const VENV_PYTHON = path.join(LOGSCOPE_VENV_DIR, process.platform === "win32" ? "Scripts/python.exe" : "bin/python3");
 
+/** Resolve the absolute path of python3 to avoid relying on inherited PATH. */
+function resolveSystemPython3(): string {
+  const cmd = process.platform === "win32" ? "where" : "which";
+  const result = execFileSync(cmd, ["python3"], { timeout: 5000, encoding: "utf-8" });
+  // `which` may return multiple lines on some systems; take the first.
+  const resolved = result.trim().split(/\r?\n/)[0];
+  if (!resolved) throw new Error("python3 not found on PATH");
+  return resolved;
+}
+
 /**
  * Ensure a Python environment with pylink-square is available.
  * Creates a venv at ~/.logscope/venv/ if needed and installs pylink.
@@ -25,9 +35,11 @@ async function ensurePythonWithPylink(): Promise<string> {
   }
 
   // 2. Check if system python3 has pylink
+  let systemPython: string | undefined;
   try {
-    execFileSync("python3", ["-c", "import pylink"], { timeout: 5000 });
-    return "python3";
+    systemPython = resolveSystemPython3();
+    execFileSync(systemPython, ["-c", "import pylink"], { timeout: 5000 });
+    return systemPython;
   } catch {
     // Not available — need to install
   }
@@ -38,9 +50,12 @@ async function ensurePythonWithPylink(): Promise<string> {
   // Ensure ~/.logscope/ exists
   fs.mkdirSync(path.dirname(LOGSCOPE_VENV_DIR), { recursive: true });
 
+  // Resolve python3 absolute path for venv creation (reuse if already resolved above)
+  const python3Path = systemPython ?? resolveSystemPython3();
+
   // Create venv
   try {
-    execFileSync("python3", ["-m", "venv", LOGSCOPE_VENV_DIR], { timeout: 30000 });
+    execFileSync(python3Path, ["-m", "venv", LOGSCOPE_VENV_DIR], { timeout: 30000 });
   } catch (err) {
     throw new Error(
       `Failed to create Python venv. Ensure python3 is installed.\n${err instanceof Error ? err.message : err}`

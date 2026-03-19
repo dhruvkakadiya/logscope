@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import type { LogEntry } from "../parser/types";
 
 export class Session {
@@ -9,7 +10,7 @@ export class Session {
   private entryCount = 0;
 
   constructor(deviceName: string, transport: "rtt" | "uart" | "swo") {
-    this.id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.id = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
     this.startTime = new Date();
     this.deviceName = deviceName;
     this.transport = transport;

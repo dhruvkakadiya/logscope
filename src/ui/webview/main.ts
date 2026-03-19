@@ -643,7 +643,8 @@ function clearTimeline(): void {
 window.addEventListener("message", (event) => {
   // VS Code webview messages are delivered via postMessage from the extension host.
   // Only trusted messages have isTrusted === true (set by the browser, not spoofable).
-  if (!event.isTrusted) return;
+  // Verify origin is a VS Code webview URI to prevent cross-origin message injection.
+  if (!event.isTrusted || !event.origin.startsWith("vscode-webview://")) return;
 
   const msg = event.data;
 

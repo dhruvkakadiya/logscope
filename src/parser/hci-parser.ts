@@ -218,7 +218,7 @@ export class HciParser {
       }
 
       case OP_SYSTEM_NOTE: {
-        const note = payload.toString("utf-8").replace(/\0+$/, "");
+        const note = payload.toString("utf-8").replace(/\0/g, "");
         message = `SYS ${note}`;
         severity = "wrn";
         break;
@@ -231,8 +231,8 @@ export class HciParser {
         if (payload.length < 2) return null;
         const priority = payload[0];
         const identLen = payload[1];
-        const ident = payload.subarray(2, 2 + identLen).toString("utf-8").replace(/\0+$/, "");
-        const msg = payload.subarray(2 + identLen).toString("utf-8").replace(/\0+$/, "");
+        const ident = payload.subarray(2, 2 + identLen).toString("utf-8").replace(/\0/g, "");
+        const msg = payload.subarray(2 + identLen).toString("utf-8").replace(/\0/g, "");
         message = `[${ident}] ${msg}`;
         pktType = "MON";
         severity = priority <= 3 ? "err" : priority <= 4 ? "wrn" : priority <= 6 ? "inf" : "dbg";
@@ -241,7 +241,7 @@ export class HciParser {
 
       case OP_NEW_INDEX: {
         if (payload.length >= 16) {
-          const name = payload.subarray(8, 16).toString("utf-8").replace(/\0+$/, "");
+          const name = payload.subarray(8, 16).toString("utf-8").replace(/\0/g, "");
           message = `HCI Index: ${name}`;
         } else {
           message = "HCI Index registered";

@@ -10,6 +10,8 @@ interface SerializedEntry {
   module: string;
   message: string;
   source: string;
+  raw?: number[];
+  decoded?: unknown;
 }
 
 /** Callback when the WebView sends a message back */
@@ -83,7 +85,7 @@ export class LogScopePanel {
   /** Queue entries for batched delivery to the WebView */
   addEntries(entries: LogEntry[]): void {
     for (const e of entries) {
-      const serialized: Record<string, unknown> = {
+      const serialized: SerializedEntry = {
         timestamp: e.timestamp,
         severity: e.severity,
         module: e.module,
@@ -214,10 +216,6 @@ export class LogScopePanel {
 }
 
 function getNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let nonce = "";
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
+  const crypto = require("crypto") as typeof import("crypto");
+  return crypto.randomBytes(16).toString("hex");
 }
