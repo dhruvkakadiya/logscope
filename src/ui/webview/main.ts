@@ -612,13 +612,18 @@ window.addEventListener("message", (event) => {
     case "disconnected": {
       connectBtn.disabled = false;
       connectBtn.textContent = "Connect";
+      // Keep logs visible — show reconnect bar with appropriate message
+      const reconnectText = reconnectBar.querySelector("span:nth-child(2)");
+      const reconnectDot = reconnectBar.querySelector(".dot") as HTMLElement;
       if (msg.unexpected) {
-        // Show reconnect bar, keep logs visible
-        reconnectBar.classList.remove("hidden");
-        connectionBar.classList.add("hidden");
+        if (reconnectText) reconnectText.textContent = "Connection lost";
+        if (reconnectDot) reconnectDot.className = "dot amber";
       } else {
-        showState("welcome");
+        if (reconnectText) reconnectText.textContent = "Disconnected";
+        if (reconnectDot) reconnectDot.className = "dot";
       }
+      reconnectBar.classList.remove("hidden");
+      connectionBar.classList.add("hidden");
       break;
     }
 
