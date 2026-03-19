@@ -210,10 +210,39 @@ export function activate(context: vscode.ExtensionContext) {
   // Initial scan + auto-connect if enabled
   const devCfg = vscode.workspace.getConfiguration("logscope");
   const autoConnect = devCfg.get<boolean>("autoConnect", false);
+  const savedTransport = devCfg.get<string>("transport", "rtt");
   const lastSerial = devCfg.get<string>("lastDevice", "");
+  const lastPort = devCfg.get<string>("uart.lastPort", "");
 
-  if (autoConnect && lastSerial) {
-    // Fast path: skip discovery, connect immediately, scan in background
+  if (autoConnect && savedTransport === "uart" && lastPort) {
+    // Auto-connect via UART
+    const attemptAutoConnect = async (attempt: number) => {
+      const MAX_RETRIES = 2;
+      const RETRY_DELAYS = [500, 2000];
+      try {
+        panel?.sendConnecting();
+        sidebarProvider.updateState({ connecting: true });
+        const baudRate = devCfg.get<number>("uart.baudRate", 115200);
+        await connectUart(lastPort, baudRate);
+        panel?.sendConnected("Serial UART", lastPort);
+        sidebarProvider.updateState({
+          connected: true, connecting: false,
+          transport: "Serial UART", address: lastPort,
+        });
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          console.log(`[LogScope] UART auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
+          setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          panel?.sendConnectError(message);
+          sidebarProvider.updateState({ connecting: false });
+        }
+      }
+    };
+    attemptAutoConnect(0);
+  } else if (autoConnect && lastSerial) {
+    // Auto-connect via RTT
     const attemptAutoConnect = async (attempt: number) => {
       const MAX_RETRIES = 2;
       const RETRY_DELAYS = [500, 2000];
@@ -231,7 +260,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
       } catch (err) {
         if (attempt < MAX_RETRIES) {
-          console.log(`[LogScope] Auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
+          console.log(`[LogScope] RTT auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
           setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
         } else {
           const message = err instanceof Error ? err.message : String(err);
@@ -240,9 +269,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     };
-    // Connect immediately, no delay
     attemptAutoConnect(0);
-    // Scan for devices in background (for the dropdown if user disconnects)
     scanAndSendDevices();
   } else {
     // No auto-connect: just scan for devices

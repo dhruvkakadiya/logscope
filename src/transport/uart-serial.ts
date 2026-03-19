@@ -33,17 +33,23 @@ const EXCLUDED_PORT_PATTERNS = [/bluetooth/i, /debug/i];
  * and debug consoles that are not real UART devices.
  */
 export async function discoverSerialPorts(): Promise<DiscoveredSerialPort[]> {
-  const SP = getSerialPort();
-  const allPorts = await SP.list();
+  try {
+    const SP = getSerialPort();
+    const allPorts = await SP.list();
+    console.log(`[LogScope] Serial port scan found ${allPorts.length} ports`);
 
-  return allPorts
-    .filter((p) => !EXCLUDED_PORT_PATTERNS.some((re) => re.test(p.path)))
-    .map((p) => ({
-      path: p.path,
-      manufacturer: p.manufacturer || undefined,
-      serialNumber: p.serialNumber || undefined,
-      pnpId: p.pnpId || undefined,
-    }));
+    return allPorts
+      .filter((p) => !EXCLUDED_PORT_PATTERNS.some((re) => re.test(p.path)))
+      .map((p) => ({
+        path: p.path,
+        manufacturer: p.manufacturer || undefined,
+        serialNumber: p.serialNumber || undefined,
+        pnpId: p.pnpId || undefined,
+      }));
+  } catch (err) {
+    console.error("[LogScope] Serial port scan failed:", err);
+    return [];
+  }
 }
 
 /**
