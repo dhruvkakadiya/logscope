@@ -884,15 +884,25 @@ window.addEventListener("message", (event) => {
       isConnected = false;
       connectBtn.disabled = false;
       connectBtn.textContent = "Connect";
-      // Keep logs visible — toggle button to Connect state
-      connStatusDot.className = msg.unexpected ? "dot amber" : "dot";
-      connStatusText.textContent = msg.unexpected ? "Connection lost" : "Disconnected";
-      connectToggleBtn.textContent = "Connect";
-      connectToggleBtn.className = "conn-btn connect";
-      (connectToggleBtn as HTMLButtonElement).disabled = false;
-      // Show reconnect bar on unexpected disconnect so the user can retry
+
       if (msg.unexpected) {
+        // Unexpected disconnect: keep logs visible, show reconnect bar
+        connStatusDot.className = "dot amber";
+        connStatusText.textContent = "Connection lost";
+        connectToggleBtn.textContent = "Connect";
+        connectToggleBtn.className = "conn-btn connect";
+        (connectToggleBtn as HTMLButtonElement).disabled = false;
         reconnectBar.classList.remove("hidden");
+      } else {
+        // User-initiated disconnect: return to welcome screen
+        showState("welcome");
+        connectError.classList.add("hidden");
+        // Re-trigger scan for current transport
+        if (selectedTransport === "uart") {
+          vscode.postMessage({ type: "refreshPorts" });
+        } else {
+          vscode.postMessage({ type: "refreshDevices" });
+        }
       }
       break;
     }
