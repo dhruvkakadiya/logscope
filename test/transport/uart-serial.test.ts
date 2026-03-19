@@ -139,6 +139,32 @@ describe("UartTransport", () => {
     expect(transport.connected).toBe(false);
   });
 
+  test("rejects if already connected", async () => {
+    const t = new UartTransport({ port: "/dev/ttyACM0" });
+    await t.connect();
+    await expect(t.connect()).rejects.toThrow("Already connected");
+  });
+
+  test("rejects with timeout if port never opens", async () => {
+    jest.useFakeTimers();
+
+    // Save original open behavior and replace with one that never calls back
+    const origOpen = MockSerialPort.prototype.open;
+    MockSerialPort.prototype.open = function () {
+      /* never calls back or emits open */
+    };
+
+    const t = new UartTransport({ port: "/dev/ttyACM0" });
+    const connectPromise = t.connect();
+
+    jest.advanceTimersByTime(10_001);
+
+    await expect(connectPromise).rejects.toThrow(/timed out/i);
+
+    MockSerialPort.prototype.open = origOpen;
+    jest.useRealTimers();
+  });
+
   test("emits error event on serial port error after connected", async () => {
     const transport = new UartTransport({ port: "/dev/ttyACM0" });
     await transport.connect();

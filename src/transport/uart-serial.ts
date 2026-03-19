@@ -63,6 +63,10 @@ export class UartTransport extends EventEmitter implements Transport {
   }
 
   async connect(): Promise<void> {
+    if (this._connected) {
+      return Promise.reject(new Error("Already connected"));
+    }
+
     return new Promise<void>((resolve, reject) => {
       const port = new SerialPort({
         path: this.portPath,
