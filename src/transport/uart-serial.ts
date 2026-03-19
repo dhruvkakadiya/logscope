@@ -1,6 +1,13 @@
 import { EventEmitter } from "events";
-import { SerialPort } from "serialport";
 import type { Transport } from "./types";
+
+// Lazy-load serialport to avoid crashing extension activation if the native
+// module has ABI issues. Only loaded when UART transport is actually used.
+function getSerialPort(): typeof import("serialport").SerialPort {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { SerialPort } = require("serialport") as typeof import("serialport");
+  return SerialPort;
+}
 
 /** Configuration for UART serial transport */
 export interface UartTransportConfig {
@@ -26,7 +33,8 @@ const EXCLUDED_PORT_PATTERNS = [/bluetooth/i, /debug/i];
  * and debug consoles that are not real UART devices.
  */
 export async function discoverSerialPorts(): Promise<DiscoveredSerialPort[]> {
-  const allPorts = await SerialPort.list();
+  const SP = getSerialPort();
+  const allPorts = await SP.list();
 
   return allPorts
     .filter((p) => !EXCLUDED_PORT_PATTERNS.some((re) => re.test(p.path)))
@@ -48,7 +56,7 @@ export async function discoverSerialPorts(): Promise<DiscoveredSerialPort[]> {
  */
 export class UartTransport extends EventEmitter implements Transport {
   private _connected = false;
-  private serialPort: SerialPort | null = null;
+  private serialPort: InstanceType<ReturnType<typeof getSerialPort>> | null = null;
   private readonly portPath: string;
   private readonly baudRate: number;
 
@@ -68,7 +76,8 @@ export class UartTransport extends EventEmitter implements Transport {
     }
 
     return new Promise<void>((resolve, reject) => {
-      const port = new SerialPort({
+      const SP = getSerialPort();
+      const port = new SP({
         path: this.portPath,
         baudRate: this.baudRate,
         autoOpen: false,
