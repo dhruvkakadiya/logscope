@@ -6,5 +6,6 @@ dist/
 build/
 .vscode/settings.json
 build-hci/
+build-uart/
 .superpowers/
 docs/
