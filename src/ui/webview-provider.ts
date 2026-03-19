@@ -181,6 +181,11 @@ export class LogScopePanel {
     this.panel?.webview.postMessage({ type: "devices", devices });
   }
 
+  /** Send discovered serial ports to the WebView */
+  sendSerialPorts(ports: Array<{ path: string; manufacturer?: string }>): void {
+    this.panel?.webview.postMessage({ type: "serialPorts", ports });
+  }
+
   // ── HTML generation ───────────────────────────────────────────
 
   private getHtml(webview: vscode.Webview): string {

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { NrfutilRttTransport, discoverDevices } from "./transport/nrfutil-rtt";
 import type { DiscoveredDevice } from "./transport/nrfutil-rtt";
+import { UartTransport, discoverSerialPorts } from "./transport/uart-serial";
 import { ZephyrLogParser } from "./parser/zephyr-log";
 import { HciParser } from "./parser/hci-parser";
 import { RingBuffer } from "./model/ring-buffer";
@@ -10,7 +11,7 @@ import { LogScopePanel } from "./ui/webview-provider";
 import { StatusBar } from "./ui/status-bar";
 import { LogScopeSidebarProvider } from "./ui/sidebar-provider";
 import { autoDetectRttAddress } from "./rtt-detect";
-import type { Transport } from "./transport/types";
+import type { Transport, ConnectConfig } from "./transport/types";
 
 // ── Module-level state ──────────────────────────────────────────
 let transport: Transport | null = null;
@@ -169,6 +170,19 @@ async function connectRtt(device: string, pollInterval: number): Promise<void> {
   startStatusUpdates();
 }
 
+async function connectUart(portPath: string, baudRate: number): Promise<void> {
+  const cfg = getConfig();
+  ringBuffer = new RingBuffer(cfg.maxEntries);
+  session = new Session("device", "uart");
+  lineBuffer = "";
+
+  const uartTransport = new UartTransport({ port: portPath, baudRate });
+  transport = uartTransport;
+  wireTransportEvents(uartTransport);
+  await uartTransport.connect();
+  startStatusUpdates();
+}
+
 // ── Activation ──────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
@@ -240,7 +254,7 @@ export function activate(context: vscode.ExtensionContext) {
     switch (msg.type) {
       case "connect":
       case "reconnect": {
-        const config = msg.config as { device: string };
+        const config = msg.config as ConnectConfig;
 
         if (transport?.connected) return;
 
@@ -248,24 +262,35 @@ export function activate(context: vscode.ExtensionContext) {
         sidebarProvider.updateState({ connecting: true });
 
         try {
-          // config.device is a serial number from discovery — always use "auto"
-          // so the helper can detect the specific chip (e.g., NRF54L15_M33 vs generic Cortex-M33)
-          const serial = config.device;
-          const discovered = lastDiscoveredDevices.find(d => String(d.serial) === serial);
-          const device = "auto";
-          const pollInterval = getConfig().rttPollInterval;
-          await connectRtt(device, pollInterval);
-          const rttTransport = transport as NrfutilRttTransport;
-          // Prefer detected target chip name; probe product name describes the debugger, not the target
-          const displayName = rttTransport.detectedDevice || "Connected";
-          // Save serial number for auto-connect on reload
-          const devCfg = vscode.workspace.getConfiguration("logscope");
-          await devCfg.update("lastDevice", serial, vscode.ConfigurationTarget.Workspace);
-          panel?.sendConnected("J-Link RTT", displayName);
-          sidebarProvider.updateState({
-            connected: true, connecting: false,
-            transport: "J-Link RTT", address: displayName,
-          });
+          if (config.transport === "uart") {
+            const baudRate = config.baudRate ?? 115200;
+            await connectUart(config.device, baudRate);
+            const devCfg = vscode.workspace.getConfiguration("logscope");
+            await devCfg.update("uart.lastPort", config.device, vscode.ConfigurationTarget.Workspace);
+            await devCfg.update("transport", "uart", vscode.ConfigurationTarget.Workspace);
+            panel?.sendConnected("Serial UART", config.device);
+            sidebarProvider.updateState({
+              connected: true, connecting: false,
+              transport: "Serial UART", address: config.device,
+            });
+          } else {
+            // RTT transport (default)
+            const serial = config.device;
+            const discovered = lastDiscoveredDevices.find(d => String(d.serial) === serial);
+            const device = "auto";
+            const pollInterval = getConfig().rttPollInterval;
+            await connectRtt(device, pollInterval);
+            const rttTransport = transport as NrfutilRttTransport;
+            const displayName = rttTransport.detectedDevice || "Connected";
+            const devCfg = vscode.workspace.getConfiguration("logscope");
+            await devCfg.update("lastDevice", serial, vscode.ConfigurationTarget.Workspace);
+            await devCfg.update("transport", "rtt", vscode.ConfigurationTarget.Workspace);
+            panel?.sendConnected("J-Link RTT", displayName);
+            sidebarProvider.updateState({
+              connected: true, connecting: false,
+              transport: "J-Link RTT", address: displayName,
+            });
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           panel?.sendConnectError(message);
@@ -279,6 +304,12 @@ export function activate(context: vscode.ExtensionContext) {
         const devices = await discoverDevices();
         lastDiscoveredDevices = devices;
         panel?.sendDevices(devices);
+        break;
+      }
+
+      case "refreshPorts": {
+        const ports = await discoverSerialPorts();
+        panel?.sendSerialPorts(ports);
         break;
       }
 
