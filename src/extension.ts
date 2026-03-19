@@ -49,6 +49,8 @@ function getInitConfig() {
 }
 
 
+let bootDetected = false; // Track if we've seen at least one boot
+
 function handleChunk(chunk: Buffer): void {
   if (!ringBuffer || !session) return;
 
@@ -58,7 +60,16 @@ function handleChunk(chunk: Buffer): void {
 
   if (segments.length === 0) return;
 
+  // Detect board reset via boot banner
   const completeText = segments.join("\n") + "\n";
+  if (completeText.includes("*** Booting")) {
+    if (bootDetected) {
+      // This is a reboot, not the first boot
+      panel?.sendReset();
+    }
+    bootDetected = true;
+  }
+
   const entries = parser.parse(completeText);
 
   for (const entry of entries) {
