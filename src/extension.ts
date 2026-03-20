@@ -744,6 +744,15 @@ export function activate(context: vscode.ExtensionContext) {
   const openCmd = vscode.commands.registerCommand("logscope.open", () => {
     const cfg = getConfig();
     panel?.show(cfg.logWrap);
+    // If connected, send state to the (possibly fresh) webview
+    if (transport?.connected) {
+      setTimeout(() => {
+        panel?.sendConnected(
+          sidebarProvider.connectedTransportLabel,
+          sidebarProvider.connectedAddress,
+        );
+      }, 150);
+    }
   });
 
   const connectCmd = vscode.commands.registerCommand("logscope.connect", async () => {

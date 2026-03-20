@@ -79,6 +79,14 @@ export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarI
     return this.state.baudRate;
   }
 
+  get connectedTransportLabel(): string {
+    return this.state.connectedTransport;
+  }
+
+  get connectedAddress(): string {
+    return this.state.connectedAddress;
+  }
+
   get isConnected(): boolean {
     return this.state.connected;
   }
