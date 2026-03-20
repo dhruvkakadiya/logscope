@@ -10,6 +10,7 @@ samples/**
 docs/superpowers/**
 .superpowers/**
 .git/**
+.worktrees/**
 .gitignore
 tsconfig.json
 esbuild.config.mjs
