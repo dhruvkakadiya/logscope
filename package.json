@@ -96,6 +96,10 @@
       {
         "command": "logscope.openWalkthrough",
         "title": "LogScope: Get Started Guide"
+      },
+      {
+        "command": "logscope.cycleParser",
+        "title": "LogScope: Select Parser"
       }
     ],
     "walkthroughs": [
@@ -287,6 +291,17 @@
           "type": "string",
           "default": "0x20000000 0x80000",
           "description": "RTT control block search range (base size in hex). Default covers 512KB starting at 0x20000000 which works for most ARM Cortex-M devices."
+        },
+        "logscope.parser": {
+          "type": "string",
+          "default": "zephyr",
+          "enum": ["zephyr", "nrf5", "raw"],
+          "enumDescriptions": [
+            "Zephyr RTOS log format ([HH:MM:SS.mmm,uuu] <level> module: message)",
+            "nRF5 SDK NRF_LOG format (<severity> module: message)",
+            "Raw mode — display lines as-is with no parsing"
+          ],
+          "description": "Log format parser. Select the format that matches your firmware's logging output."
         }
       }
     }
