@@ -556,6 +556,9 @@ async function changeSettings(): Promise<void> {
     const transportLabel = sidebarProvider.currentTransport === "rtt" ? "J-Link RTT" : "Serial UART";
     const devLabel = sidebarProvider.currentDeviceLabel || sidebarProvider.currentDevice || "None";
 
+    const parserLabels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
+    const currentParser = vscode.workspace.getConfiguration("logscope").get<string>("parser", "zephyr");
+
     const items: (vscode.QuickPickItem & { _key: string })[] = [
       { label: "$(circuit-board) Transport", description: transportLabel, _key: "transport" },
       { label: "$(device-desktop) Device", description: devLabel, _key: "device" },
@@ -564,6 +567,8 @@ async function changeSettings(): Promise<void> {
     if (sidebarProvider.currentTransport === "uart") {
       items.push({ label: "$(dashboard) Baud Rate", description: String(sidebarProvider.currentBaudRate), _key: "baudRate" });
     }
+
+    items.push({ label: "$(file-code) Parser", description: parserLabels[currentParser] || "Zephyr", _key: "parser" });
 
     const pick = await showStepQuickPick(
       items as (vscode.QuickPickItem & { _key: string })[],
@@ -640,6 +645,30 @@ async function changeSettings(): Promise<void> {
             const cfg = vscode.workspace.getConfiguration("logscope");
             await cfg.update("uart.baudRate", rate, vscode.ConfigurationTarget.Workspace);
           }
+          return;
+        }
+
+        case "parser": {
+          const modes = ["zephyr", "nrf5", "raw"] as const;
+          const labels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
+          const descriptions: Record<string, string> = {
+            zephyr: "Zephyr RTOS log format",
+            nrf5: "nRF5 SDK NRF_LOG format",
+            raw: "Display lines as-is with no parsing",
+          };
+          const parserPick = await showStepQuickPick(
+            modes.map(m => ({
+              label: labels[m],
+              value: m,
+              description: m === currentParser ? "(current)" : descriptions[m],
+            })) as (vscode.QuickPickItem & { value: string })[],
+            { placeholder: "Select log parser", title: "Connection Settings", showBack: true },
+          );
+          if (!parserPick) return;
+          const selected = (parserPick as { value: string }).value;
+          const cfg = vscode.workspace.getConfiguration("logscope");
+          await cfg.update("parser", selected, vscode.ConfigurationTarget.Workspace);
+          sidebarProvider.updateState({ parser: selected as "zephyr" | "nrf5" | "raw" });
           return;
         }
       }

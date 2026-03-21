@@ -221,9 +221,7 @@ export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarI
     }
 
     const parserLabels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
-    const parserItem = SidebarItem.action("Parser", "file-code", "logscope.cycleParser");
-    parserItem.description = parserLabels[this.state.parser] || "Zephyr";
-    items.push(parserItem);
+    items.push(SidebarItem.info("Parser", "file-code", parserLabels[this.state.parser] || "Zephyr"));
 
     items.push(SidebarItem.separator());
 
