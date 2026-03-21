@@ -6,6 +6,7 @@ import type { LogEntry } from "../parser/types";
 /** JSON-safe entry sent to the WebView */
 interface SerializedEntry {
   timestamp: number;
+  receivedAt?: number;
   severity: string;
   module: string;
   message: string;
@@ -83,6 +84,7 @@ export class LogScopePanel {
     for (const e of entries) {
       const serialized: SerializedEntry = {
         timestamp: e.timestamp,
+        receivedAt: e.receivedAt,
         severity: e.severity,
         module: e.module,
         message: e.message,
@@ -152,8 +154,8 @@ export class LogScopePanel {
   }
 
   /** Notify WebView that connection succeeded */
-  sendConnected(transport: string, address: string): void {
-    this.panel?.webview.postMessage({ type: "connected", transport, address });
+  sendConnected(transport: string, address: string, parserMode = "zephyr"): void {
+    this.panel?.webview.postMessage({ type: "connected", transport, address, parserMode });
   }
 
   /** Notify WebView of disconnection (user-initiated or unexpected) */

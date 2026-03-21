@@ -238,7 +238,7 @@ async function doConnect(): Promise<void> {
       const cfg = getConfig();
       panel?.show(cfg.logWrap);
       // Fix #1: delay sendConnected to let webview load (show() uses 100ms for init)
-      setTimeout(() => panel?.sendConnected("Serial UART", device), 150);
+      setTimeout(() => panel?.sendConnected("Serial UART", device, parserMode), 150);
       sidebarProvider.updateState({
         connected: true, connecting: false,
         connectedTransport: "Serial UART", connectedAddress: device,
@@ -254,7 +254,7 @@ async function doConnect(): Promise<void> {
 
       const cfg = getConfig();
       panel?.show(cfg.logWrap);
-      setTimeout(() => panel?.sendConnected("J-Link RTT", displayName), 150);
+      setTimeout(() => panel?.sendConnected("J-Link RTT", displayName, parserMode), 150);
       sidebarProvider.updateState({
         connected: true, connecting: false,
         connectedTransport: "J-Link RTT", connectedAddress: displayName,
@@ -795,10 +795,12 @@ export function activate(context: vscode.ExtensionContext) {
     panel?.show(cfg.logWrap);
     // If connected, send state to the (possibly fresh) webview
     if (transport?.connected) {
+      const currentParser = vscode.workspace.getConfiguration("logscope").get<string>("parser", "zephyr");
       setTimeout(() => {
         panel?.sendConnected(
           sidebarProvider.connectedTransportLabel,
           sidebarProvider.connectedAddress,
+          currentParser,
         );
       }, 150);
     }

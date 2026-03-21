@@ -219,12 +219,17 @@ body { display: flex; flex-direction: column; }
   color: var(--vscode-descriptionForeground); opacity: 0.6;
   white-space: nowrap;
 }
+#column-headers .col-time { min-width: 80px; margin-right: 10px; }
 #column-headers .col-ts { min-width: 100px; margin-right: 10px; }
 #column-headers .col-sev { min-width: 32px; margin-right: 8px; text-align: center; }
 #column-headers .col-mod { min-width: 90px; width: 90px; margin-right: 10px; }
 #column-headers .col-msg { flex: 1; }
 /* Hide timestamp column header when timestamps are hidden */
 #viewer.hide-timestamps #column-headers .col-ts { display: none; }
+/* Raw mode: hide timestamp, level, module column headers */
+#viewer.raw-mode #column-headers .col-ts { display: none; }
+#viewer.raw-mode #column-headers .col-sev { display: none; }
+#viewer.raw-mode #column-headers .col-mod { display: none; }
 
 /* End of log indicator — last element inside scrollable timeline */
 #end-of-log {
@@ -264,6 +269,7 @@ body { display: flex; flex-direction: column; }
 
 .log-row { display: flex; padding: 1px 10px; line-height: 1.4; white-space: nowrap; }
 .log-row:hover { background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04)); }
+.log-row .time { color: var(--vscode-descriptionForeground, #888); opacity: 0.6; margin-right: 10px; flex-shrink: 0; min-width: 80px; }
 .log-row .ts { color: var(--vscode-descriptionForeground, #888); margin-right: 10px; flex-shrink: 0; min-width: 100px; }
 .log-row .sev { font-weight: 700; margin-right: 8px; flex-shrink: 0; min-width: 32px; text-align: center; }
 .log-row .mod { color: var(--vscode-textLink-foreground, #3794ff); margin-right: 10px; flex-shrink: 0; min-width: 90px; width: 90px; overflow: hidden; text-overflow: ellipsis; }
@@ -330,6 +336,11 @@ body { display: flex; flex-direction: column; }
 
 /* ── Timestamp toggle ───────────────────────────────────── */
 #viewer.hide-timestamps .log-row .ts { display: none; }
+
+/* ── Raw mode: hide device timestamp, level, module ────── */
+#viewer.raw-mode .log-row .ts { display: none; }
+#viewer.raw-mode .log-row .sev { display: none; }
+#viewer.raw-mode .log-row .mod { display: none; }
 
 /* ── Wrap mode ──────────────────────────────────────────── */
 #timeline.wrap-mode .log-row { white-space: normal; }

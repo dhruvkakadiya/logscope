@@ -11,6 +11,7 @@ interface DecodedPacket {
 
 interface SerializedEntry {
   timestamp: number;
+  receivedAt?: number;
   severity: string;
   module: string;
   message: string;
@@ -79,11 +80,28 @@ function formatTimestamp(us: number): string {
   );
 }
 
+function formatWallClock(epochMs: number): string {
+  const d = new Date(epochMs);
+  return (
+    String(d.getHours()).padStart(2, "0") +
+    ":" +
+    String(d.getMinutes()).padStart(2, "0") +
+    ":" +
+    String(d.getSeconds()).padStart(2, "0") +
+    "." +
+    String(d.getMilliseconds()).padStart(3, "0")
+  );
+}
+
 // ── Row creation (XSS-safe: uses textContent, never innerHTML) ──
 function createRow(entry: SerializedEntry): HTMLDivElement {
   const row = document.createElement("div") as HTMLDivElement & { _decoded?: DecodedPacket; _raw?: number[] };
   const cssClass = entry.source === "hci" ? "hci" : entry.severity;
   row.className = `log-row ${cssClass}`;
+
+  const time = document.createElement("span");
+  time.className = "time";
+  time.textContent = entry.receivedAt ? formatWallClock(entry.receivedAt) : "";
 
   const ts = document.createElement("span");
   ts.className = "ts";
@@ -127,6 +145,7 @@ function createRow(entry: SerializedEntry): HTMLDivElement {
     }
   }
 
+  row.appendChild(time);
   row.appendChild(ts);
   row.appendChild(sev);
   row.appendChild(mod);
@@ -549,6 +568,15 @@ window.addEventListener("message", (event) => {
           hciBtn.classList.remove("disabled");
         }
       }
+
+      // Raw mode: hide severity toggles, module picker, timestamp toggle
+      const isRawMode = msg.parserMode === "raw";
+      viewerEl.classList.toggle("raw-mode", isRawMode);
+      const severityToggles = document.getElementById("severity-toggles")!;
+      const modulePicker = document.getElementById("module-picker")!;
+      severityToggles.style.display = isRawMode ? "none" : "";
+      modulePicker.style.display = isRawMode ? "none" : "";
+      timestampBtn.style.display = isRawMode ? "none" : "";
 
       connectToggleBtn.textContent = "Disconnect";
       connectToggleBtn.className = "conn-btn disconnect";
