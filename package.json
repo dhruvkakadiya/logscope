@@ -1,8 +1,8 @@
 {
   "name": "novelbits-logscope",
   "displayName": "LogScope — Embedded Log Viewer",
-  "description": "Real-time embedded log viewer with Bluetooth LE HCI decoding — Zephyr logs with filtering, search, fault detection, and Wireshark export",
-  "version": "0.2.3",
+  "description": "Real-time embedded log viewer — Zephyr, nRF5 SDK, and raw mode with Bluetooth LE HCI decoding, filtering, search, fault detection, and Wireshark export",
+  "version": "0.3.0",
   "publisher": "novelbits",
   "author": {
     "name": "Novel Bits"
@@ -123,7 +123,7 @@
           {
             "id": "logscope.walkthrough.viewLogs",
             "title": "View Real-Time Logs",
-            "description": "Once connected, the log viewer opens automatically.\n\nUse the **filter bar** to toggle severity levels (ERR, WRN, INF, DBG), filter by module, or search.\n\n**HCI decoding** shows Bluetooth LE packets with expandable details when using J-Link RTT.\n\n[Open Log Viewer](command:logscope.open)",
+            "description": "Once connected, the log viewer opens automatically.\n\nUse the **filter bar** to toggle severity levels (ERR, WRN, INF, DBG), filter by module, or search.\n\n**Parser modes:** Change Settings → Parser to switch between Zephyr, nRF5 SDK, or Raw mode.\n\n**HCI decoding** shows Bluetooth LE packets with expandable details when using J-Link RTT.\n\n[Open Log Viewer](command:logscope.open)",
             "media": {
               "image": "media/walkthrough-logs.svg",
               "altText": "Log viewer showing color-coded Zephyr logs and HCI packets"
