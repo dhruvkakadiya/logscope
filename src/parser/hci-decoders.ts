@@ -69,6 +69,101 @@ function format128BitUuid(buf: Buffer, offset: number): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+// ---------------------------------------------------------------------------
+// AD type decoder helpers (one per AD type group)
+// ---------------------------------------------------------------------------
+
+function decodeAdFlags16BitUuids(data: Buffer, adDataStart: number, adDataLen: number, adType: number): DecodedField {
+  const uuids: string[] = [];
+  for (let i = 0; i + 1 < adDataLen; i += 2) {
+    if (adDataStart + i + 1 < data.length) {
+      const uuid16 = data.readUInt16LE(adDataStart + i);
+      uuids.push(`0x${uuid16.toString(16).toUpperCase().padStart(4, "0")}`);
+    }
+  }
+  const label = adType === 0x02 ? "16-bit UUIDs (Incomplete)" : "16-bit UUIDs (Complete)";
+  return field(label, uuids.join(", "));
+}
+
+function decodeAd128BitUuids(data: Buffer, adDataStart: number, adDataLen: number, adType: number): DecodedField {
+  const uuids: string[] = [];
+  for (let i = 0; i + 15 < adDataLen; i += 16) {
+    if (adDataStart + i + 15 < data.length) {
+      uuids.push(format128BitUuid(data, adDataStart + i));
+    }
+  }
+  const label = adType === 0x06 ? "128-bit UUIDs (Incomplete)" : "128-bit UUIDs (Complete)";
+  return field(label, uuids.join(", "));
+}
+
+function decodeAdLocalName(data: Buffer, adDataStart: number, adDataLen: number, adType: number): DecodedField {
+  const end = Math.min(adDataStart + adDataLen, data.length);
+  const name = data.subarray(adDataStart, end).toString("utf-8");
+  const label = adType === 0x08 ? "Shortened Local Name" : "Complete Local Name";
+  return field(label, `"${name}"`);
+}
+
+function decodeAdManufacturerSpecific(data: Buffer, adDataStart: number, adDataLen: number): DecodedField | null {
+  if (adDataLen < 2 || adDataStart + 1 >= data.length) return null;
+  const companyId = data.readUInt16LE(adDataStart);
+  const companyHex = `0x${companyId.toString(16).toUpperCase().padStart(4, "0")}`;
+  const msdEnd = Math.min(adDataStart + adDataLen, data.length);
+  const msdData = Array.from(data.subarray(adDataStart + 2, msdEnd))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join(" ");
+  return field("Manufacturer Data", `Company: ${companyHex}, Data: ${msdData || "(empty)"}`);
+}
+
+function decodeAdUnknown(data: Buffer, adDataStart: number, adDataLen: number, adType: number): DecodedField {
+  const rawEnd = Math.min(adDataStart + adDataLen, data.length);
+  const rawHex = Array.from(data.subarray(adDataStart, rawEnd))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join(" ");
+  return field(
+    `AD Type 0x${adType.toString(16).toUpperCase().padStart(2, "0")}`,
+    rawHex || "(empty)"
+  );
+}
+
+/** Decode one AD structure entry and push any resulting fields into the output array */
+function decodeOneAdStructure(
+  data: Buffer,
+  adType: number,
+  adDataStart: number,
+  adDataLen: number,
+  fields: DecodedField[]
+): void {
+  switch (adType) {
+    case 0x01:
+      if (adDataLen >= 1) fields.push(field("AD Flags", decodeAdFlags(data[adDataStart])));
+      break;
+    case 0x02:
+    case 0x03:
+      fields.push(decodeAdFlags16BitUuids(data, adDataStart, adDataLen, adType));
+      break;
+    case 0x06:
+    case 0x07:
+      fields.push(decodeAd128BitUuids(data, adDataStart, adDataLen, adType));
+      break;
+    case 0x08:
+    case 0x09:
+      fields.push(decodeAdLocalName(data, adDataStart, adDataLen, adType));
+      break;
+    case 0x0a:
+      if (adDataLen >= 1 && adDataStart < data.length)
+        fields.push(field("TX Power Level", `${data.readInt8(adDataStart)} dBm`));
+      break;
+    case 0xff: {
+      const msdField = decodeAdManufacturerSpecific(data, adDataStart, adDataLen);
+      if (msdField) fields.push(msdField);
+      break;
+    }
+    default:
+      fields.push(decodeAdUnknown(data, adDataStart, adDataLen, adType));
+      break;
+  }
+}
+
 /**
  * Decode AD structures from Bluetooth LE advertising/scan response data.
  * Each AD structure: [length:1][type:1][data:length-1].
@@ -93,94 +188,7 @@ export function decodeAdStructures(
     const adDataStart = pos + 2;
     const adDataLen = adLen - 1;
 
-    switch (adType) {
-      // Flags
-      case 0x01: {
-        if (adDataLen >= 1) {
-          fields.push(field("AD Flags", decodeAdFlags(data[adDataStart])));
-        }
-        break;
-      }
-
-      // 16-bit UUID lists (Incomplete / Complete)
-      case 0x02:
-      case 0x03: {
-        const uuids: string[] = [];
-        for (let i = 0; i + 1 < adDataLen; i += 2) {
-          if (adDataStart + i + 1 < data.length) {
-            const uuid16 = data.readUInt16LE(adDataStart + i);
-            uuids.push(`0x${uuid16.toString(16).toUpperCase().padStart(4, "0")}`);
-          }
-        }
-        const label = adType === 0x02 ? "16-bit UUIDs (Incomplete)" : "16-bit UUIDs (Complete)";
-        fields.push(field(label, uuids.join(", ")));
-        break;
-      }
-
-      // 128-bit UUID lists (Incomplete / Complete)
-      case 0x06:
-      case 0x07: {
-        const uuids: string[] = [];
-        for (let i = 0; i + 15 < adDataLen; i += 16) {
-          if (adDataStart + i + 15 < data.length) {
-            uuids.push(format128BitUuid(data, adDataStart + i));
-          }
-        }
-        const label = adType === 0x06 ? "128-bit UUIDs (Incomplete)" : "128-bit UUIDs (Complete)";
-        fields.push(field(label, uuids.join(", ")));
-        break;
-      }
-
-      // Shortened / Complete Local Name
-      case 0x08:
-      case 0x09: {
-        const end = Math.min(adDataStart + adDataLen, data.length);
-        const name = data.subarray(adDataStart, end).toString("utf-8");
-        const label = adType === 0x08 ? "Shortened Local Name" : "Complete Local Name";
-        fields.push(field(label, `"${name}"`));
-        break;
-      }
-
-      // TX Power Level
-      case 0x0a: {
-        if (adDataLen >= 1 && adDataStart < data.length) {
-          const txPower = data.readInt8(adDataStart);
-          fields.push(field("TX Power Level", `${txPower} dBm`));
-        }
-        break;
-      }
-
-      // Manufacturer Specific Data
-      case 0xff: {
-        if (adDataLen >= 2 && adDataStart + 1 < data.length) {
-          const companyId = data.readUInt16LE(adDataStart);
-          const companyHex = `0x${companyId.toString(16).toUpperCase().padStart(4, "0")}`;
-          const msdEnd = Math.min(adDataStart + adDataLen, data.length);
-          const msdData = Array.from(data.subarray(adDataStart + 2, msdEnd))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join(" ");
-          fields.push(
-            field("Manufacturer Data", `Company: ${companyHex}, Data: ${msdData || "(empty)"}`)
-          );
-        }
-        break;
-      }
-
-      default: {
-        // Unknown AD type — show raw hex
-        const rawEnd = Math.min(adDataStart + adDataLen, data.length);
-        const rawHex = Array.from(data.subarray(adDataStart, rawEnd))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join(" ");
-        fields.push(
-          field(
-            `AD Type 0x${adType.toString(16).toUpperCase().padStart(2, "0")}`,
-            rawHex || "(empty)"
-          )
-        );
-        break;
-      }
-    }
+    decodeOneAdStructure(data, adType, adDataStart, adDataLen, fields);
 
     pos += adLen + 1;
   }
@@ -325,151 +333,146 @@ export function decodeCommand(
 
 type EventDecoder = (payload: Buffer) => DecodedPacket | null;
 
+// ---------------------------------------------------------------------------
+// LE Meta subevent helpers
+// ---------------------------------------------------------------------------
+
+function decodeLeConnectionComplete(payload: Buffer): DecodedPacket | null {
+  if (payload.length < 19) return null;
+  const status = payload[3];
+  const handle = payload.readUInt16LE(4) & 0x0fff;
+  const role = payload[6];
+  const peerAddrType = payload[7];
+  const peerAddr = formatAddress(payload, 8);
+  const interval = payload.readUInt16LE(14);
+  const latency = payload.readUInt16LE(16);
+  const timeout = payload.readUInt16LE(18);
+  return {
+    summary: `(handle: ${fmtHandle(handle)}, addr: ${peerAddr}, role: ${formatRole(role)})`,
+    fields: [
+      statusField("Status", status),
+      field("Handle", fmtHandle(handle)),
+      field("Role", formatRole(role)),
+      field("Peer Address Type", formatAddressType(peerAddrType)),
+      field("Peer Address", peerAddr, COLOR_ADDRESS),
+      field("Conn Interval", formatInterval(interval)),
+      field("Latency", latency.toString()),
+      field("Supervision Timeout", formatTimeout(timeout)),
+    ],
+  };
+}
+
+function decodeLeAdvertisingReport(payload: Buffer): DecodedPacket | null {
+  if (payload.length < 13) return null;
+  const numReports = payload[3];
+  const eventType = payload[4];
+  const addrType = payload[5];
+  const addr = formatAddress(payload, 6);
+  const dataLen = payload[12];
+  const rssiOffset = 13 + dataLen;
+  const rssi = payload.length > rssiOffset ? payload.readInt8(rssiOffset) : undefined;
+  const rssiStr = rssi !== undefined ? `${rssi} dBm` : "N/A";
+
+  const adFields: DecodedField[] = [];
+  let deviceName: string | undefined;
+  const adEnd = 13 + dataLen;
+  if (adEnd <= payload.length) {
+    for (const ad of parseAdStructures(payload, 13, adEnd)) {
+      adFields.push(...ad.fields);
+      if (ad.name) deviceName = ad.name;
+    }
+  }
+
+  const summaryName = deviceName ? `, name: "${deviceName}"` : "";
+  return {
+    summary: `(addr: ${addr}${summaryName}, RSSI: ${rssiStr})`,
+    fields: [
+      field("Num Reports", numReports.toString()),
+      field("Event Type", eventType.toString()),
+      field("Address Type", formatAddressType(addrType)),
+      field("Address", addr, COLOR_ADDRESS),
+      field("Data Length", dataLen.toString()),
+      ...adFields,
+      ...(rssi !== undefined ? [field("RSSI", rssiStr)] : []),
+    ],
+  };
+}
+
+function decodeLeDataLengthChange(payload: Buffer): DecodedPacket | null {
+  if (payload.length < 13) return null;
+  const handle = payload.readUInt16LE(3) & 0x0fff;
+  const maxTxOctets = payload.readUInt16LE(5);
+  const maxTxTime = payload.readUInt16LE(7);
+  const maxRxOctets = payload.readUInt16LE(9);
+  const maxRxTime = payload.readUInt16LE(11);
+  return {
+    summary: `(tx: ${maxTxOctets} bytes/${maxTxTime}us, rx: ${maxRxOctets} bytes/${maxRxTime}us)`,
+    fields: [
+      field("Handle", fmtHandle(handle)),
+      field("Max TX Octets", maxTxOctets.toString()),
+      field("Max TX Time", `${maxTxTime} us`),
+      field("Max RX Octets", maxRxOctets.toString()),
+      field("Max RX Time", `${maxRxTime} us`),
+    ],
+  };
+}
+
+function decodeLeEnhancedConnectionComplete(payload: Buffer): DecodedPacket | null {
+  if (payload.length < 32) return null;
+  const status = payload[3];
+  const handle = payload.readUInt16LE(4) & 0x0fff;
+  const role = payload[6];
+  const peerAddrType = payload[7];
+  const peerAddr = formatAddress(payload, 8);
+  const interval = payload.readUInt16LE(14);
+  const latency = payload.readUInt16LE(16);
+  const timeout = payload.readUInt16LE(18);
+  const localRpa = formatAddress(payload, 20);
+  const peerRpa = formatAddress(payload, 26);
+  return {
+    summary: `(handle: ${fmtHandle(handle)}, addr: ${peerAddr}, role: ${formatRole(role)})`,
+    fields: [
+      statusField("Status", status),
+      field("Handle", fmtHandle(handle)),
+      field("Role", formatRole(role)),
+      field("Peer Address Type", formatAddressType(peerAddrType)),
+      field("Peer Address", peerAddr, COLOR_ADDRESS),
+      field("Conn Interval", formatInterval(interval)),
+      field("Latency", latency.toString()),
+      field("Supervision Timeout", formatTimeout(timeout)),
+      field("Local RPA", localRpa, COLOR_ADDRESS),
+      field("Peer RPA", peerRpa, COLOR_ADDRESS),
+    ],
+  };
+}
+
+function decodeLePhyUpdateComplete(payload: Buffer): DecodedPacket | null {
+  if (payload.length < 8) return null;
+  const status = payload[3];
+  const handle = payload.readUInt16LE(4) & 0x0fff;
+  const txPhy = payload[6];
+  const rxPhy = payload[7];
+  return {
+    summary: `(tx: ${formatPhyName(txPhy)}, rx: ${formatPhyName(rxPhy)})`,
+    fields: [
+      statusField("Status", status),
+      field("Handle", fmtHandle(handle)),
+      field("TX PHY", formatPhyName(txPhy)),
+      field("RX PHY", formatPhyName(rxPhy)),
+    ],
+  };
+}
+
 /** Decode LE Meta subevents */
 function decodeLeMetaEvent(payload: Buffer): DecodedPacket | null {
   if (payload.length < 3) return null;
-  const subevent = payload[2];
-
-  switch (subevent) {
-    // LE Connection Complete
-    case 0x01: {
-      if (payload.length < 19) return null;
-      const status = payload[3];
-      const handle = payload.readUInt16LE(4) & 0x0fff;
-      const role = payload[6];
-      const peerAddrType = payload[7];
-      const peerAddr = formatAddress(payload, 8);
-      const interval = payload.readUInt16LE(14);
-      const latency = payload.readUInt16LE(16);
-      const timeout = payload.readUInt16LE(18);
-      return {
-        summary: `(handle: ${fmtHandle(handle)}, addr: ${peerAddr}, role: ${formatRole(role)})`,
-        fields: [
-          statusField("Status", status),
-          field("Handle", fmtHandle(handle)),
-          field("Role", formatRole(role)),
-          field("Peer Address Type", formatAddressType(peerAddrType)),
-          field("Peer Address", peerAddr, COLOR_ADDRESS),
-          field("Conn Interval", formatInterval(interval)),
-          field("Latency", latency.toString()),
-          field("Supervision Timeout", formatTimeout(timeout)),
-        ],
-      };
-    }
-
-    // LE Advertising Report
-    case 0x02: {
-      if (payload.length < 13) return null;
-      const numReports = payload[3];
-      const eventType = payload[4];
-      const addrType = payload[5];
-      const addr = formatAddress(payload, 6);
-      const dataLen = payload[12];
-      const rssiOffset = 13 + dataLen;
-      const rssi =
-        payload.length > rssiOffset
-          ? payload.readInt8(rssiOffset)
-          : undefined;
-      const rssiStr = rssi !== undefined ? `${rssi} dBm` : "N/A";
-
-      // Decode AD structures from the advertising data
-      const adFields: DecodedField[] = [];
-      let deviceName: string | undefined;
-      const adStart = 13;
-      const adEnd = 13 + dataLen;
-      if (adEnd <= payload.length) {
-        const adStructures = parseAdStructures(payload, adStart, adEnd);
-        for (const ad of adStructures) {
-          adFields.push(...ad.fields);
-          if (ad.name) deviceName = ad.name;
-        }
-      }
-
-      const summaryName = deviceName ? `, name: "${deviceName}"` : "";
-      return {
-        summary: `(addr: ${addr}${summaryName}, RSSI: ${rssiStr})`,
-        fields: [
-          field("Num Reports", numReports.toString()),
-          field("Event Type", eventType.toString()),
-          field("Address Type", formatAddressType(addrType)),
-          field("Address", addr, COLOR_ADDRESS),
-          field("Data Length", dataLen.toString()),
-          ...adFields,
-          ...(rssi !== undefined ? [field("RSSI", rssiStr)] : []),
-        ],
-      };
-    }
-
-    // LE Data Length Change
-    case 0x07: {
-      if (payload.length < 13) return null;
-      const handle = payload.readUInt16LE(3) & 0x0fff;
-      const maxTxOctets = payload.readUInt16LE(5);
-      const maxTxTime = payload.readUInt16LE(7);
-      const maxRxOctets = payload.readUInt16LE(9);
-      const maxRxTime = payload.readUInt16LE(11);
-      return {
-        summary: `(tx: ${maxTxOctets} bytes/${maxTxTime}us, rx: ${maxRxOctets} bytes/${maxRxTime}us)`,
-        fields: [
-          field("Handle", fmtHandle(handle)),
-          field("Max TX Octets", maxTxOctets.toString()),
-          field("Max TX Time", `${maxTxTime} us`),
-          field("Max RX Octets", maxRxOctets.toString()),
-          field("Max RX Time", `${maxRxTime} us`),
-        ],
-      };
-    }
-
-    // LE Enhanced Connection Complete
-    case 0x0a: {
-      if (payload.length < 32) return null;
-      const status = payload[3];
-      const handle = payload.readUInt16LE(4) & 0x0fff;
-      const role = payload[6];
-      const peerAddrType = payload[7];
-      const peerAddr = formatAddress(payload, 8);
-      const interval = payload.readUInt16LE(14);
-      const latency = payload.readUInt16LE(16);
-      const timeout = payload.readUInt16LE(18);
-      const localRpa = formatAddress(payload, 20);
-      const peerRpa = formatAddress(payload, 26);
-      return {
-        summary: `(handle: ${fmtHandle(handle)}, addr: ${peerAddr}, role: ${formatRole(role)})`,
-        fields: [
-          statusField("Status", status),
-          field("Handle", fmtHandle(handle)),
-          field("Role", formatRole(role)),
-          field("Peer Address Type", formatAddressType(peerAddrType)),
-          field("Peer Address", peerAddr, COLOR_ADDRESS),
-          field("Conn Interval", formatInterval(interval)),
-          field("Latency", latency.toString()),
-          field("Supervision Timeout", formatTimeout(timeout)),
-          field("Local RPA", localRpa, COLOR_ADDRESS),
-          field("Peer RPA", peerRpa, COLOR_ADDRESS),
-        ],
-      };
-    }
-
-    // LE PHY Update Complete
-    case 0x0c: {
-      if (payload.length < 8) return null;
-      const status = payload[3];
-      const handle = payload.readUInt16LE(4) & 0x0fff;
-      const txPhy = payload[6];
-      const rxPhy = payload[7];
-      return {
-        summary: `(tx: ${formatPhyName(txPhy)}, rx: ${formatPhyName(rxPhy)})`,
-        fields: [
-          statusField("Status", status),
-          field("Handle", fmtHandle(handle)),
-          field("TX PHY", formatPhyName(txPhy)),
-          field("RX PHY", formatPhyName(rxPhy)),
-        ],
-      };
-    }
-
-    default:
-      return null;
+  switch (payload[2]) {
+    case 0x01: return decodeLeConnectionComplete(payload);
+    case 0x02: return decodeLeAdvertisingReport(payload);
+    case 0x07: return decodeLeDataLengthChange(payload);
+    case 0x0a: return decodeLeEnhancedConnectionComplete(payload);
+    case 0x0c: return decodeLePhyUpdateComplete(payload);
+    default:   return null;
   }
 }
 
@@ -611,6 +614,49 @@ export function decodeEvent(
 // ACL decoder (flat decode to ATT)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ATT opcode decoder helpers
+// ---------------------------------------------------------------------------
+
+/** Decode an ATT read/write/notify/mtu opcode, mutating fields and returning a packet or null */
+function decodeAttOpcode(
+  attOpcode: number,
+  attName: string,
+  payload: Buffer,
+  handleStr: string,
+  fields: DecodedField[]
+): DecodedPacket {
+  if (attOpcode === 0x0a && payload.length >= 11) {
+    const attHandle = payload.readUInt16LE(9);
+    fields.push(field("ATT Handle", fmtHandle(attHandle)));
+    return { summary: `handle:${handleStr} ATT Read Request (handle: ${fmtHandle(attHandle)})`, fields };
+  }
+  if (attOpcode === 0x0b) {
+    const respData = payload.subarray(9);
+    fields.push(field("Data", formatValueBytes(respData)));
+    return { summary: `handle:${handleStr} ATT Read Response (${respData.length} bytes)`, fields };
+  }
+  if ((attOpcode === 0x12 || attOpcode === 0x52 || attOpcode === 0x1b) && payload.length >= 11) {
+    const attHandle = payload.readUInt16LE(9);
+    const value = payload.subarray(11);
+    fields.push(field("ATT Handle", fmtHandle(attHandle)));
+    fields.push(field("Value", formatValueBytes(value)));
+    const label =
+      attOpcode === 0x12 ? "ATT Write Request" :
+      attOpcode === 0x52 ? "ATT Write Command" :
+      "ATT Notification";
+    return { summary: `handle:${handleStr} ${label} (handle: ${fmtHandle(attHandle)})`, fields };
+  }
+  if ((attOpcode === 0x02 || attOpcode === 0x03) && payload.length >= 11) {
+    const mtu = payload.readUInt16LE(9);
+    fields.push(field("MTU", mtu.toString()));
+    return { summary: `handle:${handleStr} ATT Exchange MTU (mtu: ${mtu})`, fields };
+  }
+  // Default: just show the ATT opcode name
+  fields.push(field("ATT Opcode", attName));
+  return { summary: `handle:${handleStr} ATT ${attName}`, fields };
+}
+
 /**
  * Decode an HCI ACL data packet.
  * Payload: handle(2, lower 12 bits) + dataLen(2) + L2CAP data.
@@ -632,15 +678,14 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
 
   // Non-ATT CID: show basic info
   if (cid !== 0x0004) {
-    const nonAttFields = [
-      field("Handle", handleStr),
-      ...(conn ? [field("Peer", conn.address, COLOR_ADDRESS)] : []),
-      field("L2CAP Length", l2capLen.toString()),
-      field("CID", `0x${cid.toString(16).toUpperCase().padStart(4, "0")}`),
-    ];
     return {
       summary: `handle:${handleStr} L2CAP CID:0x${cid.toString(16).toUpperCase().padStart(4, "0")} (${l2capLen} bytes)`,
-      fields: nonAttFields,
+      fields: [
+        field("Handle", handleStr),
+        ...(conn ? [field("Peer", conn.address, COLOR_ADDRESS)] : []),
+        field("L2CAP Length", l2capLen.toString()),
+        field("CID", `0x${cid.toString(16).toUpperCase().padStart(4, "0")}`),
+      ],
     };
   }
 
@@ -650,98 +695,10 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
   const attName = attOpcodeName(attOpcode);
 
   const fields: DecodedField[] = [field("Handle", handleStr)];
-  if (conn) {
-    fields.push(field("Peer", conn.address, COLOR_ADDRESS));
-  }
+  if (conn) fields.push(field("Peer", conn.address, COLOR_ADDRESS));
 
-  switch (attOpcode) {
-    // Read Request
-    case 0x0a: {
-      if (payload.length < 11) break;
-      const attHandle = payload.readUInt16LE(9);
-      fields.push(field("ATT Handle", fmtHandle(attHandle)));
-      return {
-        summary: `handle:${handleStr} ATT Read Request (handle: ${fmtHandle(attHandle)})`,
-        fields,
-      };
-    }
+  // suppress unused-variable warning; aclDataLen is read for correctness
+  void aclDataLen;
 
-    // Read Response
-    case 0x0b: {
-      const respData = payload.subarray(9);
-      fields.push(field("Data", formatValueBytes(respData)));
-      return {
-        summary: `handle:${handleStr} ATT Read Response (${respData.length} bytes)`,
-        fields,
-      };
-    }
-
-    // Write Request
-    case 0x12: {
-      if (payload.length < 11) break;
-      const attHandle12 = payload.readUInt16LE(9);
-      const value12 = payload.subarray(11);
-      fields.push(field("ATT Handle", fmtHandle(attHandle12)));
-      fields.push(field("Value", formatValueBytes(value12)));
-      return {
-        summary: `handle:${handleStr} ATT Write Request (handle: ${fmtHandle(attHandle12)})`,
-        fields,
-      };
-    }
-
-    // Write Command
-    case 0x52: {
-      if (payload.length < 11) break;
-      const attHandle52 = payload.readUInt16LE(9);
-      const value52 = payload.subarray(11);
-      fields.push(field("ATT Handle", fmtHandle(attHandle52)));
-      fields.push(field("Value", formatValueBytes(value52)));
-      return {
-        summary: `handle:${handleStr} ATT Write Command (handle: ${fmtHandle(attHandle52)})`,
-        fields,
-      };
-    }
-
-    // Handle Value Notification
-    case 0x1b: {
-      if (payload.length < 11) break;
-      const attHandle1b = payload.readUInt16LE(9);
-      const value1b = payload.subarray(11);
-      fields.push(field("ATT Handle", fmtHandle(attHandle1b)));
-      fields.push(field("Value", formatValueBytes(value1b)));
-      return {
-        summary: `handle:${handleStr} ATT Notification (handle: ${fmtHandle(attHandle1b)})`,
-        fields,
-      };
-    }
-
-    // Exchange MTU Request
-    case 0x02: {
-      if (payload.length < 11) break;
-      const mtu = payload.readUInt16LE(9);
-      fields.push(field("MTU", mtu.toString()));
-      return {
-        summary: `handle:${handleStr} ATT Exchange MTU (mtu: ${mtu})`,
-        fields,
-      };
-    }
-
-    // Exchange MTU Response
-    case 0x03: {
-      if (payload.length < 11) break;
-      const mtu = payload.readUInt16LE(9);
-      fields.push(field("MTU", mtu.toString()));
-      return {
-        summary: `handle:${handleStr} ATT Exchange MTU (mtu: ${mtu})`,
-        fields,
-      };
-    }
-  }
-
-  // Default: just show the ATT opcode name
-  fields.push(field("ATT Opcode", attName));
-  return {
-    summary: `handle:${handleStr} ATT ${attName}`,
-    fields,
-  };
+  return decodeAttOpcode(attOpcode, attName, payload, handleStr, fields);
 }
