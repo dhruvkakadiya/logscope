@@ -187,6 +187,40 @@ async function connectUart(portPath: string, baudRate: number): Promise<void> {
 
 let connectInFlight = false;
 
+async function connectAndShowUart(device: string, baudRate: number, parserMode: string): Promise<void> {
+  await connectUart(device, baudRate);
+  const devCfg = vscode.workspace.getConfiguration("logscope");
+  await devCfg.update("uart.lastPort", device, vscode.ConfigurationTarget.Workspace);
+  await devCfg.update("transport", "uart", vscode.ConfigurationTarget.Workspace);
+
+  const cfg = getConfig();
+  panel?.show(cfg.logWrap);
+  // Fix #1: delay sendConnected to let webview load (show() uses 100ms for init)
+  setTimeout(() => panel?.sendConnected("Serial UART", device, parserMode), 150);
+  sidebarProvider.updateState({
+    connected: true, connecting: false,
+    connectedTransport: "Serial UART", connectedAddress: device,
+  });
+}
+
+async function connectAndShowRtt(device: string, parserMode: string): Promise<void> {
+  const pollInterval = getConfig().rttPollInterval;
+  await connectRtt("auto", pollInterval);
+  const rttTransport = transport as NrfutilRttTransport;
+  const displayName = rttTransport.detectedDevice || "Connected";
+  const devCfg = vscode.workspace.getConfiguration("logscope");
+  await devCfg.update("lastDevice", device, vscode.ConfigurationTarget.Workspace);
+  await devCfg.update("transport", "rtt", vscode.ConfigurationTarget.Workspace);
+
+  const cfg = getConfig();
+  panel?.show(cfg.logWrap);
+  setTimeout(() => panel?.sendConnected("J-Link RTT", displayName, parserMode), 150);
+  sidebarProvider.updateState({
+    connected: true, connecting: false,
+    connectedTransport: "J-Link RTT", connectedAddress: displayName,
+  });
+}
+
 async function doConnect(): Promise<void> {
   if (connectInFlight) return; // Fix #6: prevent concurrent connects
 
@@ -230,35 +264,9 @@ async function doConnect(): Promise<void> {
     panel?.sendConnecting();
 
     if (transportType === "uart") {
-      await connectUart(device, baudRate);
-      const devCfg = vscode.workspace.getConfiguration("logscope");
-      await devCfg.update("uart.lastPort", device, vscode.ConfigurationTarget.Workspace);
-      await devCfg.update("transport", "uart", vscode.ConfigurationTarget.Workspace);
-
-      const cfg = getConfig();
-      panel?.show(cfg.logWrap);
-      // Fix #1: delay sendConnected to let webview load (show() uses 100ms for init)
-      setTimeout(() => panel?.sendConnected("Serial UART", device, parserMode), 150);
-      sidebarProvider.updateState({
-        connected: true, connecting: false,
-        connectedTransport: "Serial UART", connectedAddress: device,
-      });
+      await connectAndShowUart(device, baudRate, parserMode);
     } else {
-      const pollInterval = getConfig().rttPollInterval;
-      await connectRtt("auto", pollInterval);
-      const rttTransport = transport as NrfutilRttTransport;
-      const displayName = rttTransport.detectedDevice || "Connected";
-      const devCfg = vscode.workspace.getConfiguration("logscope");
-      await devCfg.update("lastDevice", device, vscode.ConfigurationTarget.Workspace);
-      await devCfg.update("transport", "rtt", vscode.ConfigurationTarget.Workspace);
-
-      const cfg = getConfig();
-      panel?.show(cfg.logWrap);
-      setTimeout(() => panel?.sendConnected("J-Link RTT", displayName, parserMode), 150);
-      sidebarProvider.updateState({
-        connected: true, connecting: false,
-        connectedTransport: "J-Link RTT", connectedAddress: displayName,
-      });
+      await connectAndShowRtt(device, parserMode);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -550,6 +558,94 @@ async function pickBaudRate(showBack = false): Promise<number | undefined> {
 
 // ── Change settings flow ────────────────────────────────────────
 
+async function changeTransport(): Promise<void> {
+  const transportPick = await showStepQuickPick(
+    [
+      { label: "J-Link RTT", value: "rtt" as const, description: "Real-Time Transfer via J-Link probe" },
+      { label: "Serial UART", value: "uart" as const, description: "USB CDC ACM or UART bridge" },
+    ] as (vscode.QuickPickItem & { value: "rtt" | "uart" })[],
+    { placeholder: "Select transport", title: "Connection Settings", showBack: true },
+  );
+  if (!transportPick) return;
+  const newTransport = (transportPick as { value: "rtt" | "uart" }).value;
+  sidebarProvider.updateState({
+    transport: newTransport,
+    selectedDevice: "",
+    selectedDeviceLabel: "",
+  });
+  const cfg = vscode.workspace.getConfiguration("logscope");
+  await cfg.update("transport", newTransport, vscode.ConfigurationTarget.Workspace);
+  // After changing transport, prompt to pick a device
+  if (newTransport === "uart") {
+    const port = await pickSerialPort(true);
+    if (port) {
+      sidebarProvider.updateState({ selectedDevice: port.path, selectedDeviceLabel: port.label });
+      await cfg.update("uart.lastPort", port.path, vscode.ConfigurationTarget.Workspace);
+    }
+  } else {
+    const device = await pickJlinkDevice(true);
+    if (device) {
+      sidebarProvider.updateState({
+        selectedDevice: String(device.serial),
+        selectedDeviceLabel: `${device.targetName || "Unknown"} (SN: ${device.serial})`,
+      });
+      await cfg.update("lastDevice", String(device.serial), vscode.ConfigurationTarget.Workspace);
+    }
+  }
+}
+
+async function changeDevice(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration("logscope");
+  if (sidebarProvider.currentTransport === "uart") {
+    const port = await pickSerialPort(true);
+    if (port) {
+      sidebarProvider.updateState({ selectedDevice: port.path, selectedDeviceLabel: port.label });
+      await cfg.update("uart.lastPort", port.path, vscode.ConfigurationTarget.Workspace);
+    }
+  } else {
+    const device = await pickJlinkDevice(true);
+    if (device) {
+      sidebarProvider.updateState({
+        selectedDevice: String(device.serial),
+        selectedDeviceLabel: `${device.targetName || "Unknown"} (SN: ${device.serial})`,
+      });
+      await cfg.update("lastDevice", String(device.serial), vscode.ConfigurationTarget.Workspace);
+    }
+  }
+}
+
+async function changeBaudRate(): Promise<void> {
+  const rate = await pickBaudRate(true);
+  if (rate) {
+    sidebarProvider.updateState({ baudRate: rate });
+    const cfg = vscode.workspace.getConfiguration("logscope");
+    await cfg.update("uart.baudRate", rate, vscode.ConfigurationTarget.Workspace);
+  }
+}
+
+async function changeParser(currentParser: string): Promise<void> {
+  const modes = ["zephyr", "nrf5", "raw"] as const;
+  const labels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
+  const descriptions: Record<string, string> = {
+    zephyr: "Zephyr RTOS log format",
+    nrf5: "nRF5 SDK NRF_LOG format",
+    raw: "Display lines as-is with no parsing",
+  };
+  const parserPick = await showStepQuickPick(
+    modes.map(m => ({
+      label: labels[m],
+      value: m,
+      description: m === currentParser ? "(current)" : descriptions[m],
+    })) as (vscode.QuickPickItem & { value: string })[],
+    { placeholder: "Select log parser", title: "Connection Settings", showBack: true },
+  );
+  if (!parserPick) return;
+  const selected = (parserPick as { value: string }).value;
+  const cfg = vscode.workspace.getConfiguration("logscope");
+  await cfg.update("parser", selected, vscode.ConfigurationTarget.Workspace);
+  sidebarProvider.updateState({ parser: selected as "zephyr" | "nrf5" | "raw" });
+}
+
 async function changeSettings(): Promise<void> {
   // Loop so back buttons return to the settings menu
   while (true) {
@@ -580,97 +676,18 @@ async function changeSettings(): Promise<void> {
 
     try {
       switch (key) {
-        case "transport": {
-          const transportPick = await showStepQuickPick(
-            [
-              { label: "J-Link RTT", value: "rtt" as const, description: "Real-Time Transfer via J-Link probe" },
-              { label: "Serial UART", value: "uart" as const, description: "USB CDC ACM or UART bridge" },
-            ] as (vscode.QuickPickItem & { value: "rtt" | "uart" })[],
-            { placeholder: "Select transport", title: "Connection Settings", showBack: true },
-          );
-          if (!transportPick) return;
-          const newTransport = (transportPick as { value: "rtt" | "uart" }).value;
-          sidebarProvider.updateState({
-            transport: newTransport,
-            selectedDevice: "",
-            selectedDeviceLabel: "",
-          });
-          const cfg = vscode.workspace.getConfiguration("logscope");
-          await cfg.update("transport", newTransport, vscode.ConfigurationTarget.Workspace);
-          // After changing transport, prompt to pick a device
-          if (newTransport === "uart") {
-            const port = await pickSerialPort(true);
-            if (port) {
-              sidebarProvider.updateState({ selectedDevice: port.path, selectedDeviceLabel: port.label });
-              await cfg.update("uart.lastPort", port.path, vscode.ConfigurationTarget.Workspace);
-            }
-          } else {
-            const device = await pickJlinkDevice(true);
-            if (device) {
-              sidebarProvider.updateState({
-                selectedDevice: String(device.serial),
-                selectedDeviceLabel: `${device.targetName || "Unknown"} (SN: ${device.serial})`,
-              });
-              await cfg.update("lastDevice", String(device.serial), vscode.ConfigurationTarget.Workspace);
-            }
-          }
-          return; // Done — setting changed
-        }
-
-        case "device": {
-          const cfg = vscode.workspace.getConfiguration("logscope");
-          if (sidebarProvider.currentTransport === "uart") {
-            const port = await pickSerialPort(true);
-            if (port) {
-              sidebarProvider.updateState({ selectedDevice: port.path, selectedDeviceLabel: port.label });
-              await cfg.update("uart.lastPort", port.path, vscode.ConfigurationTarget.Workspace);
-            }
-          } else {
-            const device = await pickJlinkDevice(true);
-            if (device) {
-              sidebarProvider.updateState({
-                selectedDevice: String(device.serial),
-                selectedDeviceLabel: `${device.targetName || "Unknown"} (SN: ${device.serial})`,
-              });
-              await cfg.update("lastDevice", String(device.serial), vscode.ConfigurationTarget.Workspace);
-            }
-          }
+        case "transport":
+          await changeTransport();
           return;
-        }
-
-        case "baudRate": {
-          const rate = await pickBaudRate(true);
-          if (rate) {
-            sidebarProvider.updateState({ baudRate: rate });
-            const cfg = vscode.workspace.getConfiguration("logscope");
-            await cfg.update("uart.baudRate", rate, vscode.ConfigurationTarget.Workspace);
-          }
+        case "device":
+          await changeDevice();
           return;
-        }
-
-        case "parser": {
-          const modes = ["zephyr", "nrf5", "raw"] as const;
-          const labels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
-          const descriptions: Record<string, string> = {
-            zephyr: "Zephyr RTOS log format",
-            nrf5: "nRF5 SDK NRF_LOG format",
-            raw: "Display lines as-is with no parsing",
-          };
-          const parserPick = await showStepQuickPick(
-            modes.map(m => ({
-              label: labels[m],
-              value: m,
-              description: m === currentParser ? "(current)" : descriptions[m],
-            })) as (vscode.QuickPickItem & { value: string })[],
-            { placeholder: "Select log parser", title: "Connection Settings", showBack: true },
-          );
-          if (!parserPick) return;
-          const selected = (parserPick as { value: string }).value;
-          const cfg = vscode.workspace.getConfiguration("logscope");
-          await cfg.update("parser", selected, vscode.ConfigurationTarget.Workspace);
-          sidebarProvider.updateState({ parser: selected as "zephyr" | "nrf5" | "raw" });
+        case "baudRate":
+          await changeBaudRate();
           return;
-        }
+        case "parser":
+          await changeParser(currentParser);
+          return;
       }
     } catch (err) {
       if (err instanceof BackError) {
