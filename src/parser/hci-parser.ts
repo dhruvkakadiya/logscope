@@ -29,6 +29,15 @@ const OP_ISO_RX = 19;
 // Extended header types
 const EXT_TS32 = 8;
 
+/** Intermediate result from packet-type handlers */
+interface ParsedFields {
+  direction?: string;
+  pktType?: string;
+  message: string;
+  severity: "inf" | "dbg" | "wrn" | "err";
+  decoded?: import("./types").DecodedPacket | null;
+}
+
 export class HciParser {
   private buffer = Buffer.alloc(0);
   private tracker = new HciConnectionTracker();
@@ -95,185 +104,169 @@ export class HciParser {
   }
 
   private makeEntry(opcode: number, timestamp: number, payload: Buffer): LogEntry | null {
-    let direction: string;
-    let pktType: string;
-    let message: string;
-    let severity: "inf" | "dbg" | "wrn" | "err" = "dbg";
-    let decoded: import("./types").DecodedPacket | null = null;
-
-    switch (opcode) {
-      case OP_COMMAND: {
-        direction = "TX";
-        pktType = "CMD";
-        if (payload.length >= 3) {
-          const cmdOpcode = payload.readUInt16LE(0);
-          const paramLen = payload[2];
-          decoded = decodeCommand(cmdOpcode, payload);
-          if (decoded?.summary) {
-            message = `${direction} ${pktType} ${commandName(cmdOpcode)} ${decoded.summary}`;
-          } else {
-            message = `${direction} ${pktType} ${commandName(cmdOpcode)} (${paramLen}B)`;
-          }
-        } else {
-          message = `${direction} ${pktType} (${payload.length}B)`;
-        }
-        severity = "inf";
-        break;
-      }
-
-      case OP_EVENT: {
-        direction = "RX";
-        pktType = "EVT";
-        if (payload.length >= 2) {
-          const evtCode = payload[0];
-          const evtParamLen = payload[1];
-          const evtPayload = payload.subarray(2);
-          decoded = decodeEvent(evtCode, payload);
-          if (decoded?.summary) {
-            message = `${direction} ${pktType} ${eventName(evtCode, evtPayload)} ${decoded.summary}`;
-          } else {
-            message = `${direction} ${pktType} ${eventName(evtCode, evtPayload)} (${evtParamLen}B)`;
-          }
-
-          // Track connections: LE Connection Complete or LE Enhanced Connection Complete
-          if (decoded && evtCode === 0x3e && payload.length >= 3) {
-            const subevent = payload[2];
-            if (subevent === 0x01 || subevent === 0x0a) {
-              // Extract handle, address, and role from decoded fields
-              const handleField = decoded.fields.find((f) => f.name === "Handle");
-              const addrField = decoded.fields.find((f) => f.name === "Peer Address");
-              const roleField = decoded.fields.find((f) => f.name === "Role");
-              const statusField = decoded.fields.find((f) => f.name === "Status");
-              if (handleField && addrField && roleField && statusField?.value === "Success") {
-                const h = Number.parseInt(handleField.value, 16);
-                this.tracker.onConnectionComplete(h, addrField.value, roleField.value);
-              }
-            }
-          }
-
-          // Track disconnections
-          if (decoded && evtCode === 0x05) {
-            const handleField = decoded.fields.find((f) => f.name === "Handle");
-            if (handleField) {
-              const h = Number.parseInt(handleField.value, 16);
-              this.tracker.onDisconnection(h);
-            }
-          }
-
-          // Highlight errors in events
-          if (evtCode === 0x0F) { // Command Status
-            const status = evtPayload.length > 0 ? evtPayload[0] : 0;
-            if (status !== 0) severity = "err";
-            else severity = "inf";
-          } else {
-            severity = "inf";
-          }
-        } else {
-          message = `${direction} ${pktType} (${payload.length}B)`;
-          severity = "inf";
-        }
-        break;
-      }
-
-      case OP_ACL_TX: {
-        direction = "TX";
-        pktType = "ACL";
-        decoded = decodeAcl(payload, this.tracker);
-        if (decoded?.summary) {
-          message = `${direction} ${pktType} ${decoded.summary}`;
-        } else {
-          const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
-          message = `${direction} ${pktType} (${aclLen}B)`;
-        }
-        break;
-      }
-
-      case OP_ACL_RX: {
-        direction = "RX";
-        pktType = "ACL";
-        decoded = decodeAcl(payload, this.tracker);
-        if (decoded?.summary) {
-          message = `${direction} ${pktType} ${decoded.summary}`;
-        } else {
-          const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
-          message = `${direction} ${pktType} (${aclLen}B)`;
-        }
-        break;
-      }
-
-      case OP_SCO_TX:
-      case OP_ISO_TX: {
-        direction = "TX";
-        pktType = opcode === OP_SCO_TX ? "SCO" : "ISO";
-        message = `${direction} ${pktType} (${payload.length}B)`;
-        break;
-      }
-
-      case OP_SCO_RX:
-      case OP_ISO_RX: {
-        direction = "RX";
-        pktType = opcode === OP_SCO_RX ? "SCO" : "ISO";
-        message = `${direction} ${pktType} (${payload.length}B)`;
-        break;
-      }
-
-      case OP_SYSTEM_NOTE: {
-        const note = payload.toString("utf-8").replace(/\0/g, "");
-        message = `SYS ${note}`;
-        severity = "wrn";
-        break;
-      }
-
-      case OP_USER_LOGGING: {
-        // Zephyr log messages mirrored to BT Monitor channel.
-        // These duplicate Channel 0 entries but we show them as a filterable
-        // "MON" category so users can toggle them. Hidden by default via UI.
-        if (payload.length < 2) return null;
-        const priority = payload[0];
-        const identLen = payload[1];
-        const ident = payload.subarray(2, 2 + identLen).toString("utf-8").replace(/\0/g, "");
-        const msg = payload.subarray(2 + identLen).toString("utf-8").replace(/\0/g, "");
-        message = `[${ident}] ${msg}`;
-        pktType = "MON";
-        severity = priority <= 3 ? "err" : priority <= 4 ? "wrn" : priority <= 6 ? "inf" : "dbg";
-        break;
-      }
-
-      case OP_NEW_INDEX: {
-        if (payload.length >= 16) {
-          const name = payload.subarray(8, 16).toString("utf-8").replace(/\0/g, "");
-          message = `HCI Index: ${name}`;
-        } else {
-          message = "HCI Index registered";
-        }
-        severity = "inf";
-        break;
-      }
-
-      default: {
-        // Show unknown opcodes rather than silently dropping
-        direction = "";
-        pktType = "SYS";
-        message = `BT Monitor opcode 0x${opcode.toString(16).padStart(2, "0")} (${payload.length}B)`;
-        severity = "dbg";
-        break;
-      }
-    }
+    const handler = this.opcodeHandlers[opcode];
+    const fields = handler ? handler(payload) : this.handleUnknown(opcode, payload);
+    if (!fields) return null;
 
     const meta: Record<string, unknown> = {
       opcode,
       direction: opcode >= 2 && opcode <= 7 ? (opcode % 2 === 0 ? "tx" : "rx") : "",
     };
-    if (decoded) meta.decoded = decoded;
+    if (fields.decoded) meta.decoded = fields.decoded;
 
     return {
       timestamp,
       source: "hci",
-      severity,
-      module: pktType || "hci",
-      message,
+      severity: fields.severity,
+      module: fields.pktType || "hci",
+      message: fields.message,
       raw: new Uint8Array(payload),
       metadata: meta,
+    };
+  }
+
+  /** Dispatch table mapping BT Monitor opcodes to handler methods */
+  private readonly opcodeHandlers: Record<number, (payload: Buffer) => ParsedFields | null> = {
+    [OP_COMMAND]: (p) => this.handleCommand(p),
+    [OP_EVENT]: (p) => this.handleEvent(p),
+    [OP_ACL_TX]: (p) => this.handleAcl("TX", p),
+    [OP_ACL_RX]: (p) => this.handleAcl("RX", p),
+    [OP_SCO_TX]: (p) => this.handleSimple("TX", "SCO", p),
+    [OP_ISO_TX]: (p) => this.handleSimple("TX", "ISO", p),
+    [OP_SCO_RX]: (p) => this.handleSimple("RX", "SCO", p),
+    [OP_ISO_RX]: (p) => this.handleSimple("RX", "ISO", p),
+    [OP_SYSTEM_NOTE]: (p) => this.handleSystemNote(p),
+    [OP_USER_LOGGING]: (p) => this.handleUserLogging(p),
+    [OP_NEW_INDEX]: (p) => this.handleNewIndex(p),
+  };
+
+  private handleCommand(payload: Buffer): ParsedFields {
+    const direction = "TX";
+    const pktType = "CMD";
+
+    if (payload.length < 3) {
+      return { direction, pktType, message: `${direction} ${pktType} (${payload.length}B)`, severity: "inf" };
+    }
+
+    const cmdOpcode = payload.readUInt16LE(0);
+    const paramLen = payload[2];
+    const decoded = decodeCommand(cmdOpcode, payload);
+    const name = commandName(cmdOpcode);
+    const message = decoded?.summary
+      ? `${direction} ${pktType} ${name} ${decoded.summary}`
+      : `${direction} ${pktType} ${name} (${paramLen}B)`;
+
+    return { direction, pktType, message, severity: "inf", decoded };
+  }
+
+  private handleEvent(payload: Buffer): ParsedFields {
+    const direction = "RX";
+    const pktType = "EVT";
+
+    if (payload.length < 2) {
+      return { direction, pktType, message: `${direction} ${pktType} (${payload.length}B)`, severity: "inf" };
+    }
+
+    const evtCode = payload[0];
+    const evtParamLen = payload[1];
+    const evtPayload = payload.subarray(2);
+    const decoded = decodeEvent(evtCode, payload);
+    const name = eventName(evtCode, evtPayload);
+    const message = decoded?.summary
+      ? `${direction} ${pktType} ${name} ${decoded.summary}`
+      : `${direction} ${pktType} ${name} (${evtParamLen}B)`;
+
+    this.trackConnectionEvents(decoded, evtCode, payload);
+    this.trackDisconnectionEvents(decoded, evtCode);
+    const severity = this.eventSeverity(evtCode, evtPayload);
+
+    return { direction, pktType, message, severity, decoded };
+  }
+
+  /** Track LE Connection Complete / LE Enhanced Connection Complete events */
+  private trackConnectionEvents(
+    decoded: import("./types").DecodedPacket | null,
+    evtCode: number,
+    payload: Buffer,
+  ): void {
+    if (!decoded || evtCode !== 0x3e || payload.length < 3) return;
+
+    const subevent = payload[2];
+    if (subevent !== 0x01 && subevent !== 0x0a) return;
+
+    const handleField = decoded.fields.find((f) => f.name === "Handle");
+    const addrField = decoded.fields.find((f) => f.name === "Peer Address");
+    const roleField = decoded.fields.find((f) => f.name === "Role");
+    const statusField = decoded.fields.find((f) => f.name === "Status");
+    if (!handleField || !addrField || !roleField || statusField?.value !== "Success") return;
+
+    const h = Number.parseInt(handleField.value, 16);
+    this.tracker.onConnectionComplete(h, addrField.value, roleField.value);
+  }
+
+  /** Track Disconnection Complete events */
+  private trackDisconnectionEvents(decoded: import("./types").DecodedPacket | null, evtCode: number): void {
+    if (!decoded || evtCode !== 0x05) return;
+
+    const handleField = decoded.fields.find((f) => f.name === "Handle");
+    if (!handleField) return;
+
+    const h = Number.parseInt(handleField.value, 16);
+    this.tracker.onDisconnection(h);
+  }
+
+  /** Determine severity for HCI events */
+  private eventSeverity(evtCode: number, evtPayload: Buffer): "inf" | "err" {
+    if (evtCode !== 0x0f) return "inf";
+    // Command Status: non-zero status is an error
+    const status = evtPayload.length > 0 ? evtPayload[0] : 0;
+    return status !== 0 ? "err" : "inf";
+  }
+
+  private handleAcl(direction: "TX" | "RX", payload: Buffer): ParsedFields {
+    const pktType = "ACL";
+    const decoded = decodeAcl(payload, this.tracker);
+
+    if (decoded?.summary) {
+      return { direction, pktType, message: `${direction} ${pktType} ${decoded.summary}`, severity: "dbg", decoded };
+    }
+
+    const aclLen = payload.length >= 4 ? payload.readUInt16LE(2) : payload.length;
+    return { direction, pktType, message: `${direction} ${pktType} (${aclLen}B)`, severity: "dbg", decoded };
+  }
+
+  private handleSimple(direction: string, pktType: string, payload: Buffer): ParsedFields {
+    return { direction, pktType, message: `${direction} ${pktType} (${payload.length}B)`, severity: "dbg" };
+  }
+
+  private handleSystemNote(payload: Buffer): ParsedFields {
+    const note = payload.toString("utf-8").replace(/\0/g, "");
+    return { message: `SYS ${note}`, severity: "wrn" };
+  }
+
+  private handleUserLogging(payload: Buffer): ParsedFields | null {
+    if (payload.length < 2) return null;
+    const priority = payload[0];
+    const identLen = payload[1];
+    const ident = payload.subarray(2, 2 + identLen).toString("utf-8").replace(/\0/g, "");
+    const msg = payload.subarray(2 + identLen).toString("utf-8").replace(/\0/g, "");
+    const severity = priority <= 3 ? "err" : priority <= 4 ? "wrn" : priority <= 6 ? "inf" : "dbg";
+    return { pktType: "MON", message: `[${ident}] ${msg}`, severity } as ParsedFields;
+  }
+
+  private handleNewIndex(payload: Buffer): ParsedFields {
+    const message = payload.length >= 16
+      ? `HCI Index: ${payload.subarray(8, 16).toString("utf-8").replace(/\0/g, "")}`
+      : "HCI Index registered";
+    return { message, severity: "inf" };
+  }
+
+  private handleUnknown(opcode: number, payload: Buffer): ParsedFields {
+    return {
+      direction: "",
+      pktType: "SYS",
+      message: `BT Monitor opcode 0x${opcode.toString(16).padStart(2, "0")} (${payload.length}B)`,
+      severity: "dbg",
     };
   }
 }
