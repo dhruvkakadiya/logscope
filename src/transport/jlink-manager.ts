@@ -56,6 +56,16 @@ export class JLinkManager {
 
     // Search known directories for preferred binaries
     const dirs = JLINK_DIRS[process.platform] ?? [];
+    const found = this.searchBinariesInDirs(dirs);
+    if (found) return found;
+
+    // Try PATH lookup
+    const pathDirs = (process.env.PATH ?? "").split(path.delimiter);
+    return this.searchBinariesInDirs(pathDirs);
+  }
+
+  /** Helper: search for J-Link binaries in a list of directories */
+  private searchBinariesInDirs(dirs: string[]): { path: string; type: "gdbserver" | "commander" } | null {
     for (const binary of JLINK_BINARIES) {
       for (const dir of dirs) {
         const candidate = path.join(dir, binary.name);
@@ -64,18 +74,6 @@ export class JLinkManager {
         }
       }
     }
-
-    // Try PATH lookup
-    const pathDirs = (process.env.PATH ?? "").split(path.delimiter);
-    for (const binary of JLINK_BINARIES) {
-      for (const dir of pathDirs) {
-        const candidate = path.join(dir, binary.name);
-        if (fs.existsSync(candidate)) {
-          return { path: candidate, type: binary.type };
-        }
-      }
-    }
-
     return null;
   }
 
