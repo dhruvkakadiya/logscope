@@ -520,192 +520,189 @@ function clearTimeline(): void {
   newDataBar.classList.add("hidden");
 }
 
+// ── Message handler helpers ──────────────────────────────────────
+function handleInitMessage(msg: { wrapEnabled?: boolean }): void {
+  wrapEnabled = msg.wrapEnabled ?? false;
+  wrapBtn.classList.toggle("active", wrapEnabled);
+  timeline.classList.toggle("wrap-mode", wrapEnabled);
+}
+
+function handleConnectingMessage(): void {
+  connectToggleBtn.textContent = "Connecting...";
+  connectToggleBtn.className = "conn-btn";
+  (connectToggleBtn as HTMLButtonElement).disabled = true;
+  connStatusDot.className = "dot amber";
+  connStatusText.textContent = "Connecting...";
+}
+
+function handleConnectedMessage(msg: { address?: string; transport?: string; parserMode?: string }): void {
+  isConnected = true;
+  connDevice.textContent = msg.address ? "\u00B7 " + msg.address : "";
+  connStatusDot.className = "dot green";
+  const transportLabel = msg.transport || "J-Link RTT";
+  connStatusText.textContent = "Connected via " + transportLabel;
+
+  // Hide HCI and MON buttons when connected via UART (RTT-only features)
+  const hciBtn = document.querySelector(".hci-btn") as HTMLButtonElement | null;
+  const monBtn = document.querySelector(".mon-btn") as HTMLButtonElement | null;
+  const isUart = /uart/i.test(transportLabel);
+  if (hciBtn) {
+    hciBtn.style.display = isUart ? "none" : "";
+    if (isUart) {
+      hciBtn.classList.remove("active");
+      activeSeverities.delete("hci");
+    }
+  }
+  if (monBtn) {
+    monBtn.style.display = isUart ? "none" : "";
+    if (isUart) {
+      monBtn.classList.remove("active");
+      activeSeverities.delete("mon");
+    }
+  }
+
+  // Raw mode: hide severity toggles, module picker, timestamp toggle
+  const isRawMode = msg.parserMode === "raw";
+  viewerEl.classList.toggle("raw-mode", isRawMode);
+  const severityToggles = document.getElementById("severity-toggles")!;
+  const modulePicker = document.getElementById("module-picker")!;
+  severityToggles.style.display = isRawMode ? "none" : "";
+  modulePicker.style.display = isRawMode ? "none" : "";
+  timestampBtn.style.display = isRawMode ? "none" : "";
+
+  connectToggleBtn.textContent = "Disconnect";
+  connectToggleBtn.className = "conn-btn disconnect";
+  (connectToggleBtn as HTMLButtonElement).disabled = false;
+  connectionBar.classList.remove("hidden");
+  reconnectBar.classList.add("hidden");
+}
+
+function handleDisconnectedMessage(msg: { unexpected?: boolean }): void {
+  isConnected = false;
+
+  if (msg.unexpected) {
+    // Unexpected disconnect: keep logs visible, show reconnect bar
+    connStatusDot.className = "dot amber";
+    connStatusText.textContent = "Connection lost";
+    connectToggleBtn.textContent = "Connect";
+    connectToggleBtn.className = "conn-btn connect";
+    (connectToggleBtn as HTMLButtonElement).disabled = false;
+    reconnectBar.classList.remove("hidden");
+  } else {
+    // User-initiated disconnect: keep logs visible, update connection bar
+    connStatusDot.className = "dot amber";
+    connStatusText.textContent = "Disconnected";
+    connDevice.textContent = "";
+    connectToggleBtn.textContent = "Connect";
+    connectToggleBtn.className = "conn-btn connect";
+    (connectToggleBtn as HTMLButtonElement).disabled = false;
+  }
+}
+
+function handleConnectErrorMessage(): void {
+  connStatusDot.className = "dot amber";
+  connStatusText.textContent = "Connection failed";
+  connectToggleBtn.textContent = "Connect";
+  connectToggleBtn.className = "conn-btn connect";
+  (connectToggleBtn as HTMLButtonElement).disabled = false;
+}
+
+function handleEntriesMessage(msg: { entries: SerializedEntry[] }): void {
+  const entries = msg.entries;
+  const fragment = document.createDocumentFragment();
+
+  for (const entry of entries) {
+    const row = createRow(entry) as HTMLDivElement & { _entry?: SerializedEntry };
+    row._entry = entry;
+
+    if (!shouldShow(entry)) {
+      row.style.display = "none";
+    }
+
+    fragment.appendChild(row);
+  }
+
+  endOfLog.before(fragment);
+  endOfLog.classList.remove("hidden");
+
+  if (autoScroll) {
+    programmaticScroll = true;
+    timeline.scrollTop = timeline.scrollHeight;
+    requestAnimationFrame(() => { programmaticScroll = false; });
+    newDataBar.classList.add("hidden");
+  } else {
+    newDataBar.classList.remove("hidden");
+  }
+}
+
+function handleStatusMessage(msg: { connected: boolean; entryCount: number; evictedCount: number }): void {
+  const { connected, entryCount, evictedCount } = msg;
+  statusConnection.textContent = connected ? "Connected" : "Disconnected";
+  statusCount.textContent = `${entryCount.toLocaleString()} entries`;
+  statusEvicted.textContent =
+    evictedCount > 0 ? `(${evictedCount.toLocaleString()} evicted)` : "";
+}
+
+function handleModulesMessage(msg: { modules: string[] }): void {
+  const modules = msg.modules;
+  const currentValue = moduleSelect.value;
+
+  while (moduleSelect.options.length > 1) {
+    moduleSelect.remove(1);
+  }
+
+  for (const mod of modules.sort((a, b) => a.localeCompare(b))) {
+    const option = document.createElement("option");
+    option.value = mod;
+    option.textContent = mod;
+    moduleSelect.appendChild(option);
+  }
+
+  if (currentValue && modules.includes(currentValue)) {
+    moduleSelect.value = currentValue;
+  }
+  rebuildModulePicker();
+}
+
+function handleResetMessage(): void {
+  const sep = document.createElement("div");
+  sep.className = "reset-separator";
+  const ts = document.createElement("span");
+  ts.className = "reset-ts";
+  const now = new Date();
+  const tz = now.toLocaleTimeString("en-US", { timeZoneName: "short" }).split(" ").pop();
+  ts.textContent = now.toTimeString().slice(0, 8) + " " + tz;
+  const label = document.createElement("span");
+  label.className = "reset-label";
+  label.textContent = "\u26A0 Device Reset Detected";
+  sep.appendChild(ts);
+  sep.appendChild(label);
+  endOfLog.before(sep);
+  if (autoScroll) {
+    programmaticScroll = true;
+    timeline.scrollTop = timeline.scrollHeight;
+    requestAnimationFrame(() => { programmaticScroll = false; });
+  }
+}
+
 // ── Message handler ─────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 window.addEventListener("message", (event) => {
   if (!event.isTrusted || !event.origin.startsWith("vscode-webview://")) return;
 
-  const msg = event.data;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const msg = event.data as any;
 
   switch (msg.type) {
-    case "init": {
-      const { wrapEnabled: wrap } = msg;
-      wrapEnabled = wrap ?? false;
-      wrapBtn.classList.toggle("active", wrapEnabled);
-      timeline.classList.toggle("wrap-mode", wrapEnabled);
-      break;
-    }
-
-    case "connecting": {
-      // Update connection bar
-      connectToggleBtn.textContent = "Connecting...";
-      connectToggleBtn.className = "conn-btn";
-      (connectToggleBtn as HTMLButtonElement).disabled = true;
-      connStatusDot.className = "dot amber";
-      connStatusText.textContent = "Connecting...";
-      break;
-    }
-
-    case "connected": {
-      isConnected = true;
-      connDevice.textContent = msg.address ? "\u00B7 " + msg.address : "";
-      connStatusDot.className = "dot green";
-      const transportLabel = msg.transport || "J-Link RTT";
-      connStatusText.textContent = "Connected via " + transportLabel;
-
-      // Hide HCI and MON buttons when connected via UART (RTT-only features)
-      const hciBtn = document.querySelector(".hci-btn") as HTMLButtonElement | null;
-      const monBtn = document.querySelector(".mon-btn") as HTMLButtonElement | null;
-      const isUart = /uart/i.test(transportLabel);
-      if (hciBtn) {
-        hciBtn.style.display = isUart ? "none" : "";
-        if (isUart) {
-          hciBtn.classList.remove("active");
-          activeSeverities.delete("hci");
-        }
-      }
-      if (monBtn) {
-        monBtn.style.display = isUart ? "none" : "";
-        if (isUart) {
-          monBtn.classList.remove("active");
-          activeSeverities.delete("mon");
-        }
-      }
-
-      // Raw mode: hide severity toggles, module picker, timestamp toggle
-      const isRawMode = msg.parserMode === "raw";
-      viewerEl.classList.toggle("raw-mode", isRawMode);
-      const severityToggles = document.getElementById("severity-toggles")!;
-      const modulePicker = document.getElementById("module-picker")!;
-      severityToggles.style.display = isRawMode ? "none" : "";
-      modulePicker.style.display = isRawMode ? "none" : "";
-      timestampBtn.style.display = isRawMode ? "none" : "";
-
-      connectToggleBtn.textContent = "Disconnect";
-      connectToggleBtn.className = "conn-btn disconnect";
-      (connectToggleBtn as HTMLButtonElement).disabled = false;
-      connectionBar.classList.remove("hidden");
-      reconnectBar.classList.add("hidden");
-      break;
-    }
-
-    case "disconnected": {
-      isConnected = false;
-
-      if (msg.unexpected) {
-        // Unexpected disconnect: keep logs visible, show reconnect bar
-        connStatusDot.className = "dot amber";
-        connStatusText.textContent = "Connection lost";
-        connectToggleBtn.textContent = "Connect";
-        connectToggleBtn.className = "conn-btn connect";
-        (connectToggleBtn as HTMLButtonElement).disabled = false;
-        reconnectBar.classList.remove("hidden");
-      } else {
-        // User-initiated disconnect: keep logs visible, update connection bar
-        connStatusDot.className = "dot amber";
-        connStatusText.textContent = "Disconnected";
-        connDevice.textContent = "";
-        connectToggleBtn.textContent = "Connect";
-        connectToggleBtn.className = "conn-btn connect";
-        (connectToggleBtn as HTMLButtonElement).disabled = false;
-      }
-      break;
-    }
-
-    case "connectError": {
-      connStatusDot.className = "dot amber";
-      connStatusText.textContent = "Connection failed";
-      connectToggleBtn.textContent = "Connect";
-      connectToggleBtn.className = "conn-btn connect";
-      (connectToggleBtn as HTMLButtonElement).disabled = false;
-      break;
-    }
-
-    // ── Log data messages ────────────────────────────────────
-    case "entries": {
-      const entries: SerializedEntry[] = msg.entries;
-      const fragment = document.createDocumentFragment();
-
-      for (const entry of entries) {
-        const row = createRow(entry) as HTMLDivElement & { _entry?: SerializedEntry };
-        row._entry = entry;
-
-        if (!shouldShow(entry)) {
-          row.style.display = "none";
-        }
-
-        fragment.appendChild(row);
-      }
-
-      endOfLog.before(fragment);
-      endOfLog.classList.remove("hidden");
-
-      if (autoScroll) {
-        programmaticScroll = true;
-        timeline.scrollTop = timeline.scrollHeight;
-        requestAnimationFrame(() => { programmaticScroll = false; });
-        newDataBar.classList.add("hidden");
-      } else {
-        newDataBar.classList.remove("hidden");
-      }
-      break;
-    }
-
-    case "status": {
-      const { connected, entryCount, evictedCount } = msg;
-      statusConnection.textContent = connected ? "Connected" : "Disconnected";
-      statusCount.textContent = `${entryCount.toLocaleString()} entries`;
-      statusEvicted.textContent =
-        evictedCount > 0 ? `(${evictedCount.toLocaleString()} evicted)` : "";
-      break;
-    }
-
-    case "modules": {
-      const modules: string[] = msg.modules;
-      const currentValue = moduleSelect.value;
-
-      while (moduleSelect.options.length > 1) {
-        moduleSelect.remove(1);
-      }
-
-      for (const mod of modules.sort((a, b) => a.localeCompare(b))) {
-        const option = document.createElement("option");
-        option.value = mod;
-        option.textContent = mod;
-        moduleSelect.appendChild(option);
-      }
-
-      if (currentValue && modules.includes(currentValue)) {
-        moduleSelect.value = currentValue;
-      }
-      rebuildModulePicker();
-      break;
-    }
-
-    case "clear": {
-      clearTimeline();
-      break;
-    }
-
-    case "reset": {
-      const sep = document.createElement("div");
-      sep.className = "reset-separator";
-      const ts = document.createElement("span");
-      ts.className = "reset-ts";
-      const now = new Date();
-      const tz = now.toLocaleTimeString("en-US", { timeZoneName: "short" }).split(" ").pop();
-      ts.textContent = now.toTimeString().slice(0, 8) + " " + tz;
-      const label = document.createElement("span");
-      label.className = "reset-label";
-      label.textContent = "\u26A0 Device Reset Detected";
-      sep.appendChild(ts);
-      sep.appendChild(label);
-      endOfLog.before(sep);
-      if (autoScroll) {
-        programmaticScroll = true;
-        timeline.scrollTop = timeline.scrollHeight;
-        requestAnimationFrame(() => { programmaticScroll = false; });
-      }
-      break;
-    }
+    case "init":         handleInitMessage(msg); break;
+    case "connecting":   handleConnectingMessage(); break;
+    case "connected":    handleConnectedMessage(msg); break;
+    case "disconnected": handleDisconnectedMessage(msg); break;
+    case "connectError": handleConnectErrorMessage(); break;
+    case "entries":      handleEntriesMessage(msg); break;
+    case "status":       handleStatusMessage(msg); break;
+    case "modules":      handleModulesMessage(msg); break;
+    case "clear":        clearTimeline(); break;
+    case "reset":        handleResetMessage(); break;
   }
 });
