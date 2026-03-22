@@ -87,7 +87,7 @@ export class UartTransport extends EventEmitter implements Transport {
 
   async connect(): Promise<void> {
     if (this._connected) {
-      return Promise.reject(new Error("Already connected"));
+      throw new Error("Already connected");
     }
 
     const helperPath = path.join(__dirname, "uart-helper.py");

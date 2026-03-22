@@ -636,7 +636,7 @@ window.addEventListener("message", (event) => {
         fragment.appendChild(row);
       }
 
-      timeline.insertBefore(fragment, endOfLog);
+      endOfLog.before(fragment);
       endOfLog.classList.remove("hidden");
 
       if (autoScroll) {
@@ -699,7 +699,7 @@ window.addEventListener("message", (event) => {
       label.textContent = "\u26A0 Device Reset Detected";
       sep.appendChild(ts);
       sep.appendChild(label);
-      timeline.insertBefore(sep, endOfLog);
+      endOfLog.before(sep);
       if (autoScroll) {
         programmaticScroll = true;
         timeline.scrollTop = timeline.scrollHeight;
