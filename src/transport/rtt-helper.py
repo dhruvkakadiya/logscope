@@ -14,6 +14,19 @@ import sys
 import os
 
 
+def _wait_for_rtt_control_block(jlink):
+    """Poll until the RTT control block is found. Returns number of up-buffers or 0."""
+    for _ in range(50):
+        try:
+            num_up = jlink.rtt_get_num_up_buffers()
+            if num_up > 0:
+                return num_up
+        except Exception:
+            pass
+        time.sleep(0.1)
+    return 0
+
+
 def run_pylink(device_or_addr, poll_ms):
     """Fast path: native J-Link RTT via pylink. Works with any J-Link device."""
     import pylink
@@ -50,21 +63,13 @@ def run_pylink(device_or_addr, poll_ms):
     sys.stderr.flush()
 
     # Wait for RTT to find the control block (up to 5 seconds)
-    for _ in range(50):
-        try:
-            num_up = jlink.rtt_get_num_up_buffers()
-            if num_up > 0:
-                break
-        except Exception:
-            pass
-        time.sleep(0.1)
-    else:
+    num_up = _wait_for_rtt_control_block(jlink)
+    if num_up == 0:
         print("ERROR: Could not connect to device. Make sure firmware with RTT logging is flashed and the device is powered on.", file=sys.stderr)
         jlink.rtt_stop()
         jlink.close()
         sys.exit(2)
 
-    num_up = jlink.rtt_get_num_up_buffers()
     has_hci = num_up >= 2
     print(f"RTT_READY buffers={num_up} hci={'yes' if has_hci else 'no'}", file=sys.stderr)
     sys.stderr.flush()
@@ -91,17 +96,12 @@ def run_pylink(device_or_addr, poll_ms):
             pass
         time.sleep(0.3)
         jlink.rtt_start()
-        for _ in range(50):
-            try:
-                num_up = jlink.rtt_get_num_up_buffers()
-                if num_up > 0:
-                    has_hci = num_up >= 2
-                    print(f"RTT restarted OK, buffers={num_up}", file=sys.stderr)
-                    sys.stderr.flush()
-                    return True
-            except Exception:
-                pass
-            time.sleep(0.1)
+        num_up = _wait_for_rtt_control_block(jlink)
+        if num_up > 0:
+            has_hci = num_up >= 2
+            print(f"RTT restarted OK, buffers={num_up}", file=sys.stderr)
+            sys.stderr.flush()
+            return True
         print("RTT restart failed — control block not found", file=sys.stderr)
         sys.stderr.flush()
         return False
@@ -130,37 +130,59 @@ def run_pylink(device_or_addr, poll_ms):
             print(f"Reconnect failed: {e}", file=sys.stderr)
             sys.stderr.flush()
             return False
-        for _ in range(50):
-            try:
-                num_up = jlink.rtt_get_num_up_buffers()
-                if num_up > 0:
-                    has_hci = num_up >= 2
-                    print(f"Reconnected OK, buffers={num_up}", file=sys.stderr)
-                    sys.stderr.flush()
-                    return True
-            except Exception:
-                pass
-            time.sleep(0.1)
+        num_up = _wait_for_rtt_control_block(jlink)
+        if num_up > 0:
+            has_hci = num_up >= 2
+            print(f"Reconnected OK, buffers={num_up}", file=sys.stderr)
+            sys.stderr.flush()
+            return True
         print("Full reconnect failed — control block not found", file=sys.stderr)
         sys.stderr.flush()
         return False
 
+    def read_channels():
+        """Read available RTT channels. Returns True if any data was received."""
+        got_data = False
+        data = jlink.rtt_read(0, 4096)
+        if data:
+            write_frame(0, bytes(data))
+            got_data = True
+        if has_hci:
+            hci_data = jlink.rtt_read(1, 4096)
+            if hci_data:
+                write_frame(1, bytes(hci_data))
+                got_data = True
+        return got_data
+
+    def handle_silence(silence, stage):
+        """Handle silence timeout by escalating reconnect strategy. Returns new stage."""
+        if silence <= SILENCE_THRESHOLD:
+            return stage
+        if stage == 0:
+            # Stage 1: try lightweight RTT restart
+            restart_rtt()
+            return 1
+        if stage == 1:
+            # Stage 2: RTT restart didn't help, try full reconnect
+            full_reconnect()
+            return 2
+        # Stage 3+: full reconnect didn't help either, keep retrying
+        full_reconnect()
+        return stage
+
+    def handle_read_error(err, error_count):
+        """Handle an RTT read exception. Returns updated consecutive error count."""
+        error_count += 1
+        print(f"RTT read error #{error_count}: {err}", file=sys.stderr)
+        sys.stderr.flush()
+        if error_count >= 5:
+            full_reconnect()
+            return 0
+        return error_count
+
     while True:
         try:
-            got_data = False
-
-            # Channel 0: log text
-            data = jlink.rtt_read(0, 4096)
-            if data:
-                write_frame(0, bytes(data))
-                got_data = True
-
-            # Channel 1: HCI binary (BT Monitor)
-            if has_hci:
-                hci_data = jlink.rtt_read(1, 4096)
-                if hci_data:
-                    write_frame(1, bytes(hci_data))
-                    got_data = True
+            got_data = read_channels()
 
             if got_data:
                 last_data_time = time.monotonic()
@@ -168,30 +190,16 @@ def run_pylink(device_or_addr, poll_ms):
                 reconnect_stage = 0
             else:
                 silence = time.monotonic() - last_data_time
-                if silence > SILENCE_THRESHOLD and reconnect_stage == 0:
-                    # Stage 1: try lightweight RTT restart
-                    restart_rtt()
+                new_stage = handle_silence(silence, reconnect_stage)
+                if new_stage != reconnect_stage or silence > SILENCE_THRESHOLD:
                     last_data_time = time.monotonic()
-                    reconnect_stage = 1
-                elif silence > SILENCE_THRESHOLD and reconnect_stage == 1:
-                    # Stage 2: RTT restart didn't help, try full reconnect
-                    full_reconnect()
-                    last_data_time = time.monotonic()
-                    reconnect_stage = 2
-                elif silence > SILENCE_THRESHOLD and reconnect_stage == 2:
-                    # Stage 3: full reconnect didn't help either, keep retrying
-                    full_reconnect()
-                    last_data_time = time.monotonic()
+                reconnect_stage = new_stage
 
         except BrokenPipeError:
             break
         except Exception as e:
-            consecutive_errors += 1
-            print(f"RTT read error #{consecutive_errors}: {e}", file=sys.stderr)
-            sys.stderr.flush()
-            if consecutive_errors >= 5:
-                full_reconnect()
-                consecutive_errors = 0
+            consecutive_errors = handle_read_error(e, consecutive_errors)
+            if consecutive_errors == 0:
                 last_data_time = time.monotonic()
                 reconnect_stage = 0
             continue
@@ -200,6 +208,34 @@ def run_pylink(device_or_addr, poll_ms):
 
     jlink.rtt_stop()
     jlink.close()
+
+
+def _parse_swd_read_line(line):
+    """Parse one hex-dump line from nrfutil output. Returns list of word bytes."""
+    parts = line.split("|")[0].split()
+    result = bytearray()
+    for word_hex in parts[1:]:
+        try:
+            word = int(word_hex, 16)
+            result.extend(struct.pack("<I", word))
+        except ValueError:
+            break
+    return result
+
+
+def _swd_read_chunk(nrfutil_path, addr, nbytes):
+    """Run one nrfutil read command and return bytes."""
+    import subprocess
+    result = subprocess.run(
+        [nrfutil_path, "device", "read", "--address", hex(addr),
+         "--bytes", str(nbytes), "--direct"],
+        capture_output=True, text=True
+    )
+    data = bytearray()
+    for line in result.stdout.splitlines():
+        if line.startswith("0x"):
+            data.extend(_parse_swd_read_line(line))
+    return bytes(data)
 
 
 def run_nrfutil(rtt_addr, poll_ms, nrfutil_path):
@@ -216,20 +252,7 @@ def run_nrfutil(rtt_addr, poll_ms, nrfutil_path):
         offset = 0
         while offset < aligned:
             chunk = min(MAX_CHUNK, aligned - offset)
-            result = subprocess.run(
-                [nrfutil_path, "device", "read", "--address", hex(addr + offset),
-                 "--bytes", str(chunk), "--direct"],
-                capture_output=True, text=True
-            )
-            for line in result.stdout.splitlines():
-                if line.startswith("0x"):
-                    parts = line.split("|")[0].split()
-                    for word_hex in parts[1:]:
-                        try:
-                            word = int(word_hex, 16)
-                            data.extend(struct.pack("<I", word))
-                        except ValueError:
-                            break
+            data.extend(_swd_read_chunk(nrfutil_path, addr + offset, chunk))
             offset += chunk
         return bytes(data[:nbytes])
 
@@ -262,6 +285,15 @@ def run_nrfutil(rtt_addr, poll_ms, nrfutil_path):
     poll_interval = poll_ms / 1000.0
     errors = 0
 
+    def read_rtt_buffer(wr_off, rd_off):
+        """Read available data from the RTT ring buffer."""
+        if wr_off > rd_off:
+            return swd_read(pbuffer + rd_off, wr_off - rd_off)
+        data = swd_read(pbuffer + rd_off, buf_size - rd_off)
+        if wr_off > 0:
+            data += swd_read(pbuffer, wr_off)
+        return data
+
     while True:
         try:
             offsets = swd_read(wr_off_addr, 8)
@@ -275,12 +307,7 @@ def run_nrfutil(rtt_addr, poll_ms, nrfutil_path):
                 time.sleep(poll_interval)
                 continue
 
-            if wr_off > rd_off:
-                data = swd_read(pbuffer + rd_off, wr_off - rd_off)
-            else:
-                data = swd_read(pbuffer + rd_off, buf_size - rd_off)
-                if wr_off > 0:
-                    data += swd_read(pbuffer, wr_off)
+            data = read_rtt_buffer(wr_off, rd_off)
 
             if data:
                 stdout.write(data)
@@ -332,6 +359,27 @@ def detect_device(nrfutil_path):
     return None, None
 
 
+def _probe_core(jlink, serial):
+    """Try to connect to a probe and detect its core. Returns (targetName, device) or ({}, None)."""
+    try:
+        jlink.open(serial_no=serial)
+        for core in ["Cortex-M33", "Cortex-M4", "Cortex-M7", "Cortex-M0+"]:
+            try:
+                jlink.connect(core)
+                result = {"targetName": jlink.core_name(), "device": core}
+                jlink.close()
+                return result
+            except Exception:
+                continue
+        jlink.close()
+    except Exception:
+        try:
+            jlink.close()
+        except Exception:
+            pass
+    return {"targetName": "Unknown device"}
+
+
 def run_discover():
     """Discover connected J-Link probes and output JSON to stdout."""
     import json
@@ -358,23 +406,7 @@ def run_discover():
             info["device"] = target_jlink
         else:
             # Fall back to generic core detection via pylink
-            try:
-                jlink.open(serial_no=serial)
-                for core in ["Cortex-M33", "Cortex-M4", "Cortex-M7", "Cortex-M0+"]:
-                    try:
-                        jlink.connect(core)
-                        info["targetName"] = jlink.core_name()
-                        info["device"] = core
-                        break
-                    except Exception:
-                        continue
-                jlink.close()
-            except Exception:
-                info["targetName"] = "Unknown device"
-                try:
-                    jlink.close()
-                except Exception:
-                    pass
+            info.update(_probe_core(jlink, serial))
         devices.append(info)
     print(json.dumps({"devices": devices}))
 
