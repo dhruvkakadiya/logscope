@@ -1,14 +1,14 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
-import * as fs from "fs";
-import * as path from "path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const execFileAsync = promisify(execFile);
 
 /** Parse the _SEGGER_RTT address from `nm` output. */
 export function parseRttAddressFromNmOutput(nmOutput: string): number | null {
   for (const line of nmOutput.split("\n")) {
-    const match = line.match(/^([0-9a-fA-F]+)\s+\w\s+_SEGGER_RTT$/);
+    const match = /^([0-9a-fA-F]+)\s+\w\s+_SEGGER_RTT$/.exec(line);
     if (match) {
       return Number.parseInt(match[1], 16);
     }

@@ -126,7 +126,7 @@ body { display: flex; flex-direction: column; }
 /* Fault notification */
 .fault-notification {
   position: fixed; top: 40px; right: 12px;
-  background: rgba(244, 71, 71, 0.9); color: #fff;
+  background: #e04040; color: #fff;
   padding: 6px 14px; border-radius: 4px;
   font-size: 12px; font-weight: 600;
   z-index: 100; pointer-events: none;
@@ -188,7 +188,7 @@ body { display: flex; flex-direction: column; }
   padding: 2px 8px; border: 1px solid var(--vscode-button-border, #555);
   border-radius: 3px; background: transparent;
   color: var(--vscode-editor-foreground); cursor: pointer;
-  font-size: 11px; font-weight: 600; opacity: 0.4;
+  font-size: 11px; font-weight: 600; opacity: 0.6;
   white-space: nowrap; transition: opacity 0.1s, background 0.1s;
 }
 .filter-toggle:hover { opacity: 0.9; }
@@ -244,7 +244,7 @@ body { display: flex; flex-direction: column; }
   display: flex; align-items: center; padding: 3px 10px; line-height: 1.4; white-space: nowrap;
   background: rgba(204, 167, 0, 0.08);
   border-left: 3px solid #cca700;
-  color: #cca700; opacity: 0.7;
+  color: #cca700; opacity: 0.85;
   font-size: var(--vscode-editor-font-size, 13px);
 }
 .reset-separator .reset-ts { flex-shrink: 0; margin-right: 10px; font-size: 11px; }

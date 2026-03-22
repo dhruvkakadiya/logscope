@@ -41,7 +41,7 @@ export function exportAsBtsnoop(entries: LogEntry[], sessionStartTime: Date): Bu
   // Filter to HCI entries with raw data and a real HCI opcode (2-7, 18-19)
   const hciEntries = entries.filter(
     (e) => e.source === "hci" && e.raw && e.raw.length > 0 && typeof e.metadata?.opcode === "number"
-      && [2, 3, 4, 5, 6, 7, 18, 19].includes(e.metadata.opcode as number)
+      && [2, 3, 4, 5, 6, 7, 18, 19].includes(e.metadata.opcode)
   );
 
   // Calculate total size

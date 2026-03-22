@@ -1,8 +1,8 @@
-import { ChildProcess, spawn } from "child_process";
-import * as net from "net";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { ChildProcess, spawn } from "node:child_process";
+import * as net from "node:net";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 export interface JLinkConfig {
   jlinkPath: string; // empty = auto-detect
@@ -26,8 +26,8 @@ const JLINK_DIRS: Record<string, string[]> = {
     "/usr/local/bin",
   ],
   win32: [
-    "C:\\Program Files\\SEGGER\\JLink",
-    "C:\\Program Files (x86)\\SEGGER\\JLink",
+    String.raw`C:\Program Files\SEGGER\JLink`,
+    String.raw`C:\Program Files (x86)\SEGGER\JLink`,
   ],
 };
 
@@ -167,8 +167,7 @@ export class JLinkManager {
     if (config.rttAddress) {
       cmds.push(`exec SetRTTAddr ${config.rttAddress}`);
     }
-    cmds.push("go"); // Resume CPU execution — connect halts the core
-    cmds.push("sleep 100000000");
+    cmds.push("go", "sleep 100000000"); // Resume CPU execution — connect halts the core
     fs.writeFileSync(cmdFile, cmds.join("\n") + "\n");
     console.log("[LogScope JLink] Command file:", cmdFile, "commands:", cmds);
 

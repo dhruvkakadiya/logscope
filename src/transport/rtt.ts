@@ -1,5 +1,5 @@
-import { EventEmitter } from "events";
-import * as net from "net";
+import { EventEmitter } from "node:events";
+import * as net from "node:net";
 import type { Transport } from "./types";
 
 export class RttTransport extends EventEmitter implements Transport {

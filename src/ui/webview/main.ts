@@ -247,7 +247,7 @@ function collapseExpandedRow(): void {
   if (expanded) {
     expanded.classList.remove("expanded");
     const detail = expanded.nextElementSibling;
-    if (detail && detail.classList.contains("hci-detail")) {
+    if (detail?.classList.contains("hci-detail")) {
       detail.remove();
     }
   }
@@ -261,7 +261,7 @@ timeline.addEventListener("click", (e: Event) => {
     // Collapse this row
     target.classList.remove("expanded");
     const detail = target.nextElementSibling;
-    if (detail && detail.classList.contains("hci-detail")) {
+    if (detail?.classList.contains("hci-detail")) {
       detail.remove();
     }
   } else {
@@ -432,7 +432,7 @@ function selectModule(value: string, label: string) {
   });
 }
 function rebuildModulePicker() {
-  while (modulePickerList.firstChild) modulePickerList.removeChild(modulePickerList.firstChild);
+  while (modulePickerList.firstChild) modulePickerList.firstChild.remove();
   const allItem = document.createElement("div");
   allItem.className = "picker-option" + (selectedModule === "" ? " selected" : "");
   allItem.dataset.value = "";
@@ -513,7 +513,7 @@ function refilterTimeline(): void {
 // ── Safe DOM clear helper ───────────────────────────────────────
 function clearTimeline(): void {
   while (timeline.firstChild) {
-    timeline.removeChild(timeline.firstChild);
+    timeline.firstChild.remove();
   }
   endOfLog.classList.add("hidden");
   timeline.appendChild(endOfLog);
@@ -651,7 +651,7 @@ function handleModulesMessage(msg: { modules: string[] }): void {
     moduleSelect.remove(1);
   }
 
-  for (const mod of modules.sort((a, b) => a.localeCompare(b))) {
+  for (const mod of modules.toSorted((a, b) => a.localeCompare(b))) {
     const option = document.createElement("option");
     option.value = mod;
     option.textContent = mod;

@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 
 export class StatusBar {
-  private connectionItem: vscode.StatusBarItem;
-  private countItem: vscode.StatusBarItem;
+  private readonly connectionItem: vscode.StatusBarItem;
+  private readonly countItem: vscode.StatusBarItem;
 
   constructor() {
     this.connectionItem = vscode.window.createStatusBarItem(

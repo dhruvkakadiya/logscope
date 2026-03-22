@@ -18,10 +18,10 @@ export interface SidebarState {
 }
 
 export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<SidebarItem | undefined>();
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<SidebarItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  private state: SidebarState = {
+  private readonly state: SidebarState = {
     connected: false,
     connecting: false,
     transport: "rtt",
@@ -167,11 +167,9 @@ export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarI
     const items: SidebarItem[] = [];
     const transportLabel = this.state.connectedTransport || (this.state.transport === "rtt" ? "J-Link RTT" : "Serial UART");
 
-    items.push(SidebarItem.info(
-      `Connected via ${transportLabel}`,
-      "plug",
-      "",
-    ));
+    items.push(
+      SidebarItem.info(`Connected via ${transportLabel}`, "plug", ""),
+    );
 
     if (this.state.connectedAddress) {
       items.push(SidebarItem.info("Device", "device-desktop", this.state.connectedAddress));
@@ -189,11 +187,9 @@ export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarI
       items.push(SidebarItem.info("Duration", "clock", duration));
     }
 
-    items.push(SidebarItem.info(
-      "Entries",
-      "list-ordered",
-      this.state.entryCount.toLocaleString(),
-    ));
+    items.push(
+      SidebarItem.info("Entries", "list-ordered", this.state.entryCount.toLocaleString()),
+    );
 
     if (this.state.hciPacketCount > 0) {
       items.push(SidebarItem.info("HCI Packets", "radio-tower", this.state.hciPacketCount.toLocaleString()));
@@ -210,28 +206,25 @@ export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarI
     const items: SidebarItem[] = [];
     const transportLabel = this.state.transport === "rtt" ? "J-Link RTT" : "Serial UART";
 
-    items.push(SidebarItem.info("Transport", "circuit-board", transportLabel));
-    items.push(SidebarItem.info(
-      "Device",
-      "device-desktop",
-      this.state.selectedDeviceLabel || this.state.selectedDevice,
-    ));
+    items.push(
+      SidebarItem.info("Transport", "circuit-board", transportLabel),
+      SidebarItem.info("Device", "device-desktop", this.state.selectedDeviceLabel || this.state.selectedDevice),
+    );
     if (this.state.transport === "uart") {
       items.push(SidebarItem.info("Baud Rate", "dashboard", String(this.state.baudRate)));
     }
 
     const parserLabels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
-    items.push(SidebarItem.info("Parser", "file-code", parserLabels[this.state.parser] || "Zephyr"));
-
-    items.push(SidebarItem.separator());
-
-    items.push(SidebarItem.action("Reconnect", "debug-start", "logscope.reconnect"));
-    items.push(SidebarItem.action("Change Settings", "settings-gear", "logscope.changeSettings"));
-    items.push(SidebarItem.action("Connect New Device", "plug", "logscope.connect"));
-
-    items.push(SidebarItem.separator());
-    items.push(SidebarItem.action("Get Started Guide", "book", "logscope.openWalkthrough"));
-    items.push(SidebarItem.link("Help & Feedback", "globe", "https://novelbits.io/logscope"));
+    items.push(
+      SidebarItem.info("Parser", "file-code", parserLabels[this.state.parser] || "Zephyr"),
+      SidebarItem.separator(),
+      SidebarItem.action("Reconnect", "debug-start", "logscope.reconnect"),
+      SidebarItem.action("Change Settings", "settings-gear", "logscope.changeSettings"),
+      SidebarItem.action("Connect New Device", "plug", "logscope.connect"),
+      SidebarItem.separator(),
+      SidebarItem.action("Get Started Guide", "book", "logscope.openWalkthrough"),
+      SidebarItem.link("Help & Feedback", "globe", "https://novelbits.io/logscope"),
+    );
 
     return items;
   }

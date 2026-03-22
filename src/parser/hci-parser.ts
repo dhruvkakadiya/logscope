@@ -40,7 +40,7 @@ interface ParsedFields {
 
 export class HciParser {
   private buffer = Buffer.alloc(0);
-  private tracker = new HciConnectionTracker();
+  private readonly tracker = new HciConnectionTracker();
 
   /**
    * Feed raw binary data from RTT Channel 1.
@@ -79,7 +79,6 @@ export class HciParser {
 
     const dataLen = packet.readUInt16LE(0);
     const opcode = packet.readUInt16LE(2);
-    const flags = packet[4];
     const hdrLen = packet[5];
 
     // Extract timestamp from extended header
@@ -108,10 +107,11 @@ export class HciParser {
     const fields = handler ? handler(payload) : this.handleUnknown(opcode, payload);
     if (!fields) return null;
 
-    const meta: Record<string, unknown> = {
-      opcode,
-      direction: opcode >= 2 && opcode <= 7 ? (opcode % 2 === 0 ? "tx" : "rx") : "",
-    };
+    let direction = "";
+    if (opcode >= 2 && opcode <= 7) {
+      direction = opcode % 2 === 0 ? "tx" : "rx";
+    }
+    const meta: Record<string, unknown> = { opcode, direction };
     if (fields.decoded) meta.decoded = fields.decoded;
 
     return {
@@ -220,7 +220,7 @@ export class HciParser {
     if (evtCode !== 0x0f) return "inf";
     // Command Status: non-zero status is an error
     const status = evtPayload.length > 0 ? evtPayload[0] : 0;
-    return status !== 0 ? "err" : "inf";
+    return status === 0 ? "inf" : "err";
   }
 
   private handleAcl(direction: "TX" | "RX", payload: Buffer): ParsedFields {
@@ -240,7 +240,7 @@ export class HciParser {
   }
 
   private handleSystemNote(payload: Buffer): ParsedFields {
-    const note = payload.toString("utf-8").replace(/\0/g, "");
+    const note = payload.toString("utf-8").replaceAll("\0", "");
     return { message: `SYS ${note}`, severity: "wrn" };
   }
 
@@ -248,15 +248,24 @@ export class HciParser {
     if (payload.length < 2) return null;
     const priority = payload[0];
     const identLen = payload[1];
-    const ident = payload.subarray(2, 2 + identLen).toString("utf-8").replace(/\0/g, "");
-    const msg = payload.subarray(2 + identLen).toString("utf-8").replace(/\0/g, "");
-    const severity = priority <= 3 ? "err" : priority <= 4 ? "wrn" : priority <= 6 ? "inf" : "dbg";
-    return { pktType: "MON", message: `[${ident}] ${msg}`, severity } as ParsedFields;
+    const ident = payload.subarray(2, 2 + identLen).toString("utf-8").replaceAll("\0", "");
+    const msg = payload.subarray(2 + identLen).toString("utf-8").replaceAll("\0", "");
+    let severity: "err" | "wrn" | "inf" | "dbg";
+    if (priority <= 3) {
+      severity = "err";
+    } else if (priority <= 4) {
+      severity = "wrn";
+    } else if (priority <= 6) {
+      severity = "inf";
+    } else {
+      severity = "dbg";
+    }
+    return { pktType: "MON", message: `[${ident}] ${msg}`, severity };
   }
 
   private handleNewIndex(payload: Buffer): ParsedFields {
     const message = payload.length >= 16
-      ? `HCI Index: ${payload.subarray(8, 16).toString("utf-8").replace(/\0/g, "")}`
+      ? `HCI Index: ${payload.subarray(8, 16).toString("utf-8").replaceAll("\0", "")}`
       : "HCI Index registered";
     return { message, severity: "inf" };
   }

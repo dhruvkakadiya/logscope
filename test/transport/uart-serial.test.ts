@@ -1,6 +1,6 @@
 import { UartTransport, discoverSerialPorts } from "../../src/transport/uart-serial";
-import { ChildProcess, spawn } from "child_process";
-import { EventEmitter } from "events";
+import { ChildProcess, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 
 // Mock child_process.spawn
 jest.mock("child_process", () => {

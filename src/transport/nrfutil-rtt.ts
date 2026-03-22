@@ -1,8 +1,8 @@
-import { EventEmitter } from "events";
-import { ChildProcess, spawn, execFileSync } from "child_process";
-import * as path from "path";
-import * as fs from "fs";
-import * as os from "os";
+import { EventEmitter } from "node:events";
+import { ChildProcess, spawn, execFileSync } from "node:child_process";
+import * as path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import type { Transport } from "./types";
 
 /** Directory for LogScope's auto-managed Python venv */
@@ -192,7 +192,7 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
         }
 
         // Capture auto-detected device name
-        const deviceMatch = stderrBuf.match(/DEVICE_DETECTED (\S+)/);
+        const deviceMatch = /DEVICE_DETECTED (\S+)/.exec(stderrBuf);
         if (deviceMatch) {
           this.detectedDevice = deviceMatch[1];
         }
@@ -254,11 +254,11 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
       proc.on("error", (err) => {
         this._connected = false;
         this.helper = null;
-        if (!resolved) {
+        if (resolved) {
+          this.emit("error", err);
+        } else {
           resolved = true;
           reject(err);
-        } else {
-          this.emit("error", err);
         }
       });
 

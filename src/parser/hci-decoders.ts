@@ -41,7 +41,7 @@ function fmtHandle(h: number): string {
 /** Create a status field with red color for non-zero */
 function statusField(name: string, code: number): DecodedField {
   const text = hciErrorCode(code);
-  return code !== 0x00 ? field(name, text, COLOR_ERROR) : field(name, text);
+  return code === 0x00 ? field(name, text) : field(name, text, COLOR_ERROR);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +371,7 @@ function decodeLeAdvertisingReport(payload: Buffer): DecodedPacket | null {
   const dataLen = payload[12];
   const rssiOffset = 13 + dataLen;
   const rssi = payload.length > rssiOffset ? payload.readInt8(rssiOffset) : undefined;
-  const rssiStr = rssi !== undefined ? `${rssi} dBm` : "N/A";
+  const rssiStr = rssi === undefined ? "N/A" : `${rssi} dBm`;
 
   const adFields: DecodedField[] = [];
   let deviceName: string | undefined;
@@ -393,7 +393,7 @@ function decodeLeAdvertisingReport(payload: Buffer): DecodedPacket | null {
       field("Address", addr, COLOR_ADDRESS),
       field("Data Length", dataLen.toString()),
       ...adFields,
-      ...(rssi !== undefined ? [field("RSSI", rssiStr)] : []),
+      ...(rssi === undefined ? [] : [field("RSSI", rssiStr)]),
     ],
   };
 }
@@ -548,11 +548,13 @@ const eventDecoders: Record<number, EventDecoder> = {
             const lmpVersion = p[9];
             const manufacturer = p.readUInt16LE(10);
             const lmpSubversion = p.readUInt16LE(12);
-            fields.push(field("HCI Version", hciVersion.toString()));
-            fields.push(field("HCI Revision", `0x${hciRevision.toString(16).toUpperCase().padStart(4, "0")}`));
-            fields.push(field("LMP Version", lmpVersion.toString()));
-            fields.push(field("Manufacturer", `0x${manufacturer.toString(16).toUpperCase().padStart(4, "0")}`));
-            fields.push(field("LMP Subversion", `0x${lmpSubversion.toString(16).toUpperCase().padStart(4, "0")}`));
+            fields.push(
+              field("HCI Version", hciVersion.toString()),
+              field("HCI Revision", `0x${hciRevision.toString(16).toUpperCase().padStart(4, "0")}`),
+              field("LMP Version", lmpVersion.toString()),
+              field("Manufacturer", `0x${manufacturer.toString(16).toUpperCase().padStart(4, "0")}`),
+              field("LMP Subversion", `0x${lmpSubversion.toString(16).toUpperCase().padStart(4, "0")}`),
+            );
           }
           break;
         }
@@ -562,8 +564,10 @@ const eventDecoders: Record<number, EventDecoder> = {
           if (p.length >= 9) {
             const leDataPktLen = p.readUInt16LE(6);
             const totalNumLePkts = p[8];
-            fields.push(field("LE Data Packet Length", leDataPktLen.toString()));
-            fields.push(field("Total LE Packets", totalNumLePkts.toString()));
+            fields.push(
+              field("LE Data Packet Length", leDataPktLen.toString()),
+              field("Total LE Packets", totalNumLePkts.toString()),
+            );
           }
           break;
         }
@@ -639,8 +643,7 @@ function decodeAttOpcode(
   if ((attOpcode === 0x12 || attOpcode === 0x52 || attOpcode === 0x1b) && payload.length >= 11) {
     const attHandle = payload.readUInt16LE(9);
     const value = payload.subarray(11);
-    fields.push(field("ATT Handle", fmtHandle(attHandle)));
-    fields.push(field("Value", formatValueBytes(value)));
+    fields.push(field("ATT Handle", fmtHandle(attHandle)), field("Value", formatValueBytes(value)));
     const label =
       attOpcode === 0x12 ? "ATT Write Request" :
       attOpcode === 0x52 ? "ATT Write Command" :
@@ -666,7 +669,6 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
   if (payload.length < 8) return null;
 
   const handle = payload.readUInt16LE(0) & 0x0fff;
-  const aclDataLen = payload.readUInt16LE(2);
   const handleStr = fmtHandle(handle);
 
   // Look up peer info from connection tracker
@@ -696,9 +698,6 @@ export function decodeAcl(payload: Buffer, tracker?: HciConnectionTracker): Deco
 
   const fields: DecodedField[] = [field("Handle", handleStr)];
   if (conn) fields.push(field("Peer", conn.address, COLOR_ADDRESS));
-
-  // suppress unused-variable warning; aclDataLen is read for correctness
-  void aclDataLen;
 
   return decodeAttOpcode(attOpcode, attName, payload, handleStr, fields);
 }

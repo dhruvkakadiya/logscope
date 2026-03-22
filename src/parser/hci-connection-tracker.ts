@@ -3,7 +3,7 @@
  * mapping handles to peer address and role for ACL packet enrichment.
  */
 export class HciConnectionTracker {
-  private connections = new Map<number, { address: string; role: string }>();
+  private readonly connections = new Map<number, { address: string; role: string }>();
 
   onConnectionComplete(handle: number, address: string, role: string): void {
     this.connections.set(handle, { address, role });

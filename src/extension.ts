@@ -13,7 +13,6 @@ import { exportAsBtsnoop } from "./model/btsnoop-export";
 import { LogScopePanel } from "./ui/webview-provider";
 import { StatusBar } from "./ui/status-bar";
 import { LogScopeSidebarProvider } from "./ui/sidebar-provider";
-import { autoDetectRttAddress } from "./rtt-detect";
 import type { Transport } from "./transport/types";
 
 // ── Module-level state ──────────────────────────────────────────
@@ -886,6 +885,8 @@ export function activate(context: vscode.ExtensionContext) {
         if (attempt < MAX_RETRIES) {
           console.log(`[LogScope] Auto-connect attempt ${attempt} failed, retrying in ${RETRY_DELAYS[attempt]}ms...`);
           setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
+        } else {
+          console.log(`[LogScope] Auto-connect failed after ${MAX_RETRIES + 1} attempts`);
         }
       }
     };

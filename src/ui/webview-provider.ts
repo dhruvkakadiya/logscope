@@ -204,6 +204,6 @@ export class LogScopePanel {
 }
 
 function getNonce(): string {
-  const crypto = require("crypto") as typeof import("crypto");
+  const crypto = require("node:crypto") as typeof import("node:crypto");
   return crypto.randomBytes(16).toString("hex");
 }

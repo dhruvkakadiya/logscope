@@ -1,6 +1,6 @@
-import { EventEmitter } from "events";
-import { ChildProcess, spawn } from "child_process";
-import * as path from "path";
+import { EventEmitter } from "node:events";
+import { ChildProcess, spawn } from "node:child_process";
+import * as path from "node:path";
 import type { Transport } from "./types";
 
 // Reuse the same Python environment setup from the RTT transport
@@ -153,11 +153,11 @@ export class UartTransport extends EventEmitter implements Transport {
       proc.on("error", (err) => {
         this._connected = false;
         this.helper = null;
-        if (!resolved) {
+        if (resolved) {
+          this.emit("error", err);
+        } else {
           resolved = true;
           reject(err);
-        } else {
-          this.emit("error", err);
         }
       });
 
