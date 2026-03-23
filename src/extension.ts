@@ -51,7 +51,7 @@ function handleChunk(chunk: Buffer): void {
   if (!ringBuffer || !session) return;
 
   lineBuffer += chunk.toString("utf-8");
-  const segments = lineBuffer.split("\n");
+  const segments = lineBuffer.split(/\r?\n|\r/);
   lineBuffer = segments.pop() ?? "";
 
   if (segments.length === 0) return;
