@@ -133,6 +133,8 @@ Not all features are available in every combination. This matrix shows what's av
 - **nRF5 SDK** — parses `<severity> module: message` format (nRF5 SDK's `NRF_LOG` output) with severity mapping and optional tick timestamps
 - **Raw** — displays lines as-is with no parsing. Use for bare `printf`, ESP-IDF, or any firmware output. Only the Time column (host clock) and search are shown
 
+> **Note:** Firmware that uses ANSI cursor positioning to create dashboard-style displays (e.g., refreshing status screens) will appear as flat text lines in LogScope. For dashboard-style firmware, use a standard serial terminal.
+
 Change the parser via **Change Settings → Parser** in the sidebar, or `Ctrl+Shift+P` → **LogScope: Select Parser**.
 
 ## Settings
