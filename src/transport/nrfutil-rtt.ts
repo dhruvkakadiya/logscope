@@ -350,7 +350,18 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
 
   disconnect(): void {
     if (this.helper) {
-      this.helper.kill();
+      // Send "quit" to stdin for graceful shutdown (rtt_stop + jlink.close)
+      // before killing the process, so the J-Link probe is released cleanly.
+      try {
+        this.helper.stdin?.write("quit\n");
+      } catch {
+        // stdin may already be closed
+      }
+      // Give the helper a moment to clean up, then force-kill
+      const proc = this.helper;
+      setTimeout(() => {
+        try { proc.kill(); } catch { /* already exited */ }
+      }, 500);
       this.helper = null;
     }
     this._connected = false;

@@ -152,16 +152,36 @@ async function connectRtt(device: string, pollInterval: number, serialNumber?: s
   session = new Session("device", "rtt");
   lineBuffer = "";
 
-  const rttTransport = new NrfutilRttTransport({
-    device,
-    serialNumber,
-    pollIntervalMs: pollInterval,
-    nrfutilPath: cfg.nrfutilPath,
-  });
-  transport = rttTransport;
-  wireTransportEvents(rttTransport);
-  await rttTransport.connect();
-  startStatusUpdates();
+  const MAX_RETRIES = 2;
+  const RETRY_DELAY_MS = 2000;
+  let lastErr: Error | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[LogScope] RTT connect retry ${attempt}/${MAX_RETRIES} after ${RETRY_DELAY_MS}ms...`);
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    }
+
+    const rttTransport = new NrfutilRttTransport({
+      device,
+      serialNumber,
+      pollIntervalMs: pollInterval,
+      nrfutilPath: cfg.nrfutilPath,
+    });
+    transport = rttTransport;
+    wireTransportEvents(rttTransport);
+
+    try {
+      await rttTransport.connect();
+      startStatusUpdates();
+      return;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      rttTransport.disconnect();
+    }
+  }
+
+  throw lastErr ?? new Error("RTT connection failed");
 }
 
 async function connectUart(portPath: string, baudRate: number): Promise<void> {
