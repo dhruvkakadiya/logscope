@@ -2,6 +2,12 @@
 
 All notable changes to LogScope will be documented in this file.
 
+## [0.2.6] — 2026-03-23
+
+### Changed
+- Activity bar icon updated — structured log columns design (level | module | message)
+- Sidebar: "Help & Feedback" replaced with "Documentation" (by Novel Bits) and "Report Issue" (GitHub)
+
 ## [0.2.5] — 2026-03-23
 
 ### Fixed
