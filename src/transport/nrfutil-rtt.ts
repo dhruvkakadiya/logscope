@@ -9,14 +9,23 @@ import type { Transport } from "./types";
 const LOGSCOPE_VENV_DIR = path.join(os.homedir(), ".logscope", "venv");
 const VENV_PYTHON = path.join(LOGSCOPE_VENV_DIR, process.platform === "win32" ? "Scripts/python.exe" : "bin/python3");
 
-/** Resolve the absolute path of python3 to avoid relying on inherited PATH. */
-function resolveSystemPython3(): string {
+/**
+ * Resolve the absolute path of Python to avoid relying on inherited PATH.
+ * Tries "python3" first (macOS/Linux), then "python" (Windows).
+ */
+export function resolveSystemPython(): string {
   const cmd = process.platform === "win32" ? "where" : "which";
-  const result = execFileSync(cmd, ["python3"], { timeout: 5000, encoding: "utf-8" });
-  // `which` may return multiple lines on some systems; take the first.
-  const resolved = result.trim().split(/\r?\n/)[0];
-  if (!resolved) throw new Error("python3 not found on PATH");
-  return resolved;
+  const candidates = process.platform === "win32" ? ["python", "python3"] : ["python3", "python"];
+  for (const candidate of candidates) {
+    try {
+      const result = execFileSync(cmd, [candidate], { timeout: 5000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      const resolved = result.trim().split(/\r?\n/)[0];
+      if (resolved) return resolved;
+    } catch {
+      // Try next candidate
+    }
+  }
+  throw new Error("Python not found on PATH. Install Python 3 and ensure it is on your PATH.");
 }
 
 /**
@@ -37,7 +46,7 @@ async function ensurePythonWithPylink(): Promise<string> {
   // 2. Check if system python3 has pylink
   let systemPython: string | undefined;
   try {
-    systemPython = resolveSystemPython3();
+    systemPython = resolveSystemPython();
     execFileSync(systemPython, ["-c", "import pylink"], { timeout: 5000 });
     return systemPython;
   } catch {
@@ -51,7 +60,7 @@ async function ensurePythonWithPylink(): Promise<string> {
   fs.mkdirSync(path.dirname(LOGSCOPE_VENV_DIR), { recursive: true });
 
   // Resolve python3 absolute path for venv creation (reuse if already resolved above)
-  const python3Path = systemPython ?? resolveSystemPython3();
+  const python3Path = systemPython ?? resolveSystemPython();
 
   // Create venv
   try {
