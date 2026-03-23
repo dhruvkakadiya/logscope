@@ -679,7 +679,7 @@ async function doExport(): Promise<void> {
   if (formatValue === "btsnoop") {
     const hciCount = entries.filter(e => e.source === "hci" && e.raw && e.metadata?.opcode).length;
     if (hciCount === 0) {
-      vscode.window.showWarningMessage("LogScope: No HCI packets to export. Connect a Bluetooth LE device to generate HCI traffic.");
+      vscode.window.showWarningMessage("LogScope: No HCI packets captured. To export btsnoop, enable the Bluetooth LE monitor (bt_monitor) in your firmware and connect via J-Link RTT.");
       return;
     }
     const uri = await vscode.window.showSaveDialog({
