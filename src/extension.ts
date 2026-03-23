@@ -51,6 +51,11 @@ function handleChunk(chunk: Buffer): void {
   if (!ringBuffer || !session) return;
 
   lineBuffer += chunk.toString("utf-8");
+  // Replace cursor positioning/screen control ANSI codes with newlines so they
+  // act as line breaks (e.g. \033[7;12H, \033[2J, \033[?25l). Color codes
+  // (\033[...m) are left intact for the parser to strip.
+  // eslint-disable-next-line no-control-regex
+  lineBuffer = lineBuffer.replace(/\x1b\[[\d;]*[HJK]|\x1b\[\?\d+[hl]/g, "\n");
   const segments = lineBuffer.split(/\r?\n|\r/);
   lineBuffer = segments.pop() ?? "";
 
