@@ -81,6 +81,8 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
     last_data_time = time.monotonic()
     SILENCE_THRESHOLD = 3.0  # seconds of no data before RTT restart
     reconnect_stage = 0  # 0=normal, 1=tried RTT restart, 2=tried full reconnect
+    reconnect_attempts = 0
+    MAX_RECONNECT_ATTEMPTS = 3  # exit after this many failed full reconnects
 
     def write_frame(channel, data):
         """Write framed data: [channel:1][length:4 LE][data:N]"""
@@ -127,7 +129,10 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
             pass
         time.sleep(0.5)
         try:
-            jlink.open()
+            if serial_no:
+                jlink.open(serial_no=serial_no)
+            else:
+                jlink.open()
             jlink.connect(device)
             if jlink.halted():
                 jlink.restart()
@@ -181,12 +186,26 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
                     reconnect_stage = 1
                 elif silence > SILENCE_THRESHOLD and reconnect_stage == 1:
                     # Stage 2: RTT restart didn't help, try full reconnect
-                    full_reconnect()
+                    if full_reconnect():
+                        reconnect_attempts = 0
+                    else:
+                        reconnect_attempts += 1
                     last_data_time = time.monotonic()
                     reconnect_stage = 2
                 elif silence > SILENCE_THRESHOLD and reconnect_stage == 2:
-                    # Stage 3: full reconnect didn't help either, keep retrying
-                    full_reconnect()
+                    # Stage 3: full reconnect didn't help either, retry with limit
+                    if full_reconnect():
+                        reconnect_attempts = 0
+                    else:
+                        reconnect_attempts += 1
+                    if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                        print("ERROR: Device disconnected — too many failed reconnect attempts", file=sys.stderr)
+                        sys.stderr.flush()
+                        try:
+                            jlink.close()
+                        except Exception:
+                            pass
+                        sys.exit(4)
                     last_data_time = time.monotonic()
 
         except BrokenPipeError:
