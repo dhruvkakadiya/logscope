@@ -236,10 +236,22 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
             break
         except Exception as e:
             consecutive_errors += 1
-            print(f"RTT read error #{consecutive_errors}: {e}", file=sys.stderr)
-            sys.stderr.flush()
+            if consecutive_errors <= 2:
+                print(f"RTT read error #{consecutive_errors}: {e}", file=sys.stderr)
+                sys.stderr.flush()
             if consecutive_errors >= 5:
-                full_reconnect()
+                if not full_reconnect():
+                    reconnect_attempts += 1
+                    if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                        print("ERROR: Device disconnected — giving up after repeated failures", file=sys.stderr)
+                        sys.stderr.flush()
+                        try:
+                            jlink.close()
+                        except Exception:
+                            pass
+                        sys.exit(4)
+                else:
+                    reconnect_attempts = 0
                 consecutive_errors = 0
                 last_data_time = time.monotonic()
                 reconnect_stage = 0
