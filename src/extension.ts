@@ -666,9 +666,28 @@ async function changeParser(currentParser: string): Promise<void> {
   );
   if (!parserPick) return;
   const selected = (parserPick as { value: string }).value;
+  if (selected === currentParser) return;
   const cfg = vscode.workspace.getConfiguration("logscope");
   await cfg.update("parser", selected, vscode.ConfigurationTarget.Workspace);
   sidebarProvider.updateState({ parser: selected as "zephyr" | "nrf5" | "raw" });
+
+  // If connected, offer to reconnect so the new parser takes effect
+  if (transport?.connected) {
+    const parserLabels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
+    const answer = await vscode.window.showInformationMessage(
+      `Parser changed to ${parserLabels[selected]}. Reconnect to apply?`,
+      "Reconnect",
+      "Later",
+    );
+    if (answer === "Reconnect") {
+      userDisconnecting = true;
+      disconnectAll();
+      panel?.sendDisconnected(false);
+      sidebarProvider.updateState({ connected: false, connecting: false });
+      setTimeout(() => { userDisconnecting = false; }, 100);
+      await doConnect();
+    }
+  }
 }
 
 async function changeSettings(): Promise<void> {
@@ -882,18 +901,9 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const cycleParserCmd = vscode.commands.registerCommand("logscope.cycleParser", async () => {
-    const modes = ["zephyr", "nrf5", "raw"] as const;
-    const labels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
     const cfg = vscode.workspace.getConfiguration("logscope");
     const current = cfg.get<string>("parser", "zephyr");
-    const pick = await vscode.window.showQuickPick(
-      modes.map(m => ({ label: labels[m], value: m, description: m === current ? "(current)" : "" })),
-      { placeHolder: "Select log parser" },
-    );
-    if (!pick) return;
-    const selected = (pick as { value: string }).value;
-    await cfg.update("parser", selected, vscode.ConfigurationTarget.Workspace);
-    sidebarProvider.updateState({ parser: selected as "zephyr" | "nrf5" | "raw" });
+    await changeParser(current);
   });
 
   // ── Auto-connect on activation ────────────────────────────
