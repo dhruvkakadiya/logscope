@@ -11,75 +11,134 @@ const VENV_PYTHON = path.join(LOGSCOPE_VENV_DIR, process.platform === "win32" ? 
 
 /**
  * Resolve the absolute path of Python to avoid relying on inherited PATH.
- * Tries "python3" first (macOS/Linux), then "python" (Windows).
+ * Searches PATH first, then falls back to common install locations on each platform.
  */
 export function resolveSystemPython(): string {
   const cmd = process.platform === "win32" ? "where" : "which";
   const candidates = process.platform === "win32" ? ["python", "python3"] : ["python3", "python"];
+
+  // 1. Try PATH lookup
   for (const candidate of candidates) {
     try {
       const result = execFileSync(cmd, [candidate], { timeout: 5000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
       const resolved = result.trim().split(/\r?\n/)[0];
-      if (resolved) return resolved;
+      // On Windows, skip the Microsoft Store app execution alias stubs
+      if (resolved && !resolved.includes("WindowsApps")) return resolved;
     } catch {
       // Try next candidate
     }
   }
-  throw new Error("Python not found on PATH. Install Python 3 and ensure it is on your PATH.");
-}
 
-/**
- * Ensure a Python environment with pylink-square is available.
- * Creates a venv at ~/.logscope/venv/ if needed and installs pylink.
- */
-async function ensurePythonWithPylink(): Promise<string> {
-  // 1. Check if our managed venv already exists and has pylink
-  if (fs.existsSync(VENV_PYTHON)) {
+  // 2. Fall back to common install locations
+  const wellKnownPaths: string[] = [];
+  if (process.platform === "win32") {
+    const home = os.homedir();
+    const localPrograms = path.join(home, "AppData", "Local", "Programs", "Python");
+    // Scan for Python3xx directories (e.g., Python313, Python312)
     try {
-      execFileSync(VENV_PYTHON, ["-c", "import pylink"], { timeout: 5000 });
-      return VENV_PYTHON;
+      const dirs = fs.readdirSync(localPrograms)
+        .filter(d => /^Python3\d+$/.test(d))
+        .sort()
+        .reverse(); // newest first
+      for (const d of dirs) {
+        wellKnownPaths.push(path.join(localPrograms, d, "python.exe"));
+      }
     } catch {
-      // venv exists but pylink missing — reinstall below
+      // Directory doesn't exist
+    }
+    wellKnownPaths.push("C:\\Python313\\python.exe", "C:\\Python312\\python.exe", "C:\\Python311\\python.exe");
+  } else if (process.platform === "darwin") {
+    wellKnownPaths.push(
+      "/opt/homebrew/bin/python3",
+      "/usr/local/bin/python3",
+      "/usr/bin/python3",
+    );
+  } else {
+    wellKnownPaths.push(
+      "/usr/bin/python3",
+      "/usr/local/bin/python3",
+    );
+  }
+
+  for (const p of wellKnownPaths) {
+    try {
+      if (fs.existsSync(p)) {
+        // Verify it actually runs
+        execFileSync(p, ["--version"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+        return p;
+      }
+    } catch {
+      // Try next
     }
   }
 
-  // 2. Check if system python3 has pylink
+  throw new Error("Python 3 not found. Install Python 3 from python.org and reload VS Code.");
+}
+
+/**
+ * Ensure a Python venv at ~/.logscope/venv/ with the required packages.
+ * Creates the venv on first use and installs any missing packages.
+ */
+export async function ensurePythonEnv(packages: string[]): Promise<string> {
+  // Map pip package names to their Python import names
+  const IMPORT_MAP: Record<string, string> = { "pylink-square": "pylink", "pyserial": "serial" };
+  const importChecks = packages.map(p => IMPORT_MAP[p] ?? p);
+
+  // 1. Check if our managed venv already exists and has all packages
+  if (fs.existsSync(VENV_PYTHON)) {
+    try {
+      const checkImports = importChecks.map(m => `import ${m}`).join("; ");
+      execFileSync(VENV_PYTHON, ["-c", checkImports], { timeout: 5000 });
+      return VENV_PYTHON;
+    } catch {
+      // venv exists but packages missing — install below
+    }
+  }
+
+  // 2. Check if system python has all packages
   let systemPython: string | undefined;
   try {
     systemPython = resolveSystemPython();
-    execFileSync(systemPython, ["-c", "import pylink"], { timeout: 5000 });
+    const checkImports = importChecks.map(m => `import ${m}`).join("; ");
+    execFileSync(systemPython, ["-c", checkImports], { timeout: 5000 });
     return systemPython;
   } catch {
     // Not available — need to install
   }
 
-  // 3. Create venv and install pylink
-  console.log("[LogScope] Setting up Python environment (one-time setup)...");
+  // 3. Create venv if it doesn't exist
+  if (!fs.existsSync(VENV_PYTHON)) {
+    console.log("[LogScope] Setting up Python environment (one-time setup)...");
+    fs.mkdirSync(path.dirname(LOGSCOPE_VENV_DIR), { recursive: true });
 
-  // Ensure ~/.logscope/ exists
-  fs.mkdirSync(path.dirname(LOGSCOPE_VENV_DIR), { recursive: true });
+    const python3Path = systemPython ?? resolveSystemPython();
 
-  // Resolve python3 absolute path for venv creation (reuse if already resolved above)
-  const python3Path = systemPython ?? resolveSystemPython();
-
-  // Create venv
-  try {
-    execFileSync(python3Path, ["-m", "venv", LOGSCOPE_VENV_DIR], { timeout: 30000 });
-  } catch (err) {
-    throw new Error(
-      `Failed to create Python venv. Ensure python3 is installed.\n${err instanceof Error ? err.message : err}`
-    );
+    try {
+      execFileSync(python3Path, ["-m", "venv", LOGSCOPE_VENV_DIR], { timeout: 30000 });
+    } catch (err) {
+      throw new Error(
+        `Failed to create Python venv. Ensure python3 is installed.\n${err instanceof Error ? err.message : err}`
+      );
+    }
   }
 
-  // Install pylink-square
+  // 4. Install missing packages into venv
   const pip = path.join(LOGSCOPE_VENV_DIR, process.platform === "win32" ? "Scripts/pip.exe" : "bin/pip");
-  try {
-    execFileSync(pip, ["install", "pylink-square"], { timeout: 60000 });
-    console.log("[LogScope] pylink-square installed successfully");
-  } catch (err) {
-    throw new Error(
-      `Failed to install pylink-square. Check your internet connection.\n${err instanceof Error ? err.message : err}`
-    );
+  for (let i = 0; i < packages.length; i++) {
+    try {
+      execFileSync(VENV_PYTHON, ["-c", `import ${importChecks[i]}`], { timeout: 5000 });
+      continue; // Already installed
+    } catch {
+      // Need to install
+    }
+    try {
+      execFileSync(pip, ["install", packages[i]], { timeout: 60000 });
+      console.log(`[LogScope] ${packages[i]} installed successfully`);
+    } catch (err) {
+      throw new Error(
+        `Failed to install ${packages[i]}. Check your internet connection.\n${err instanceof Error ? err.message : err}`
+      );
+    }
   }
 
   return VENV_PYTHON;
@@ -100,7 +159,7 @@ export interface DiscoveredDevice {
  */
 export async function discoverDevices(): Promise<DiscoveredDevice[]> {
   const helperPath = path.join(__dirname, "rtt-helper.py");
-  const pythonPath = await ensurePythonWithPylink();
+  const pythonPath = await ensurePythonEnv(["pylink-square"]);
 
   return new Promise((resolve) => {
     const proc = spawn(pythonPath, [helperPath, "discover"], {
@@ -165,7 +224,7 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
 
   async connect(): Promise<void> {
     const helperPath = path.join(__dirname, "rtt-helper.py");
-    const pythonPath = await ensurePythonWithPylink();
+    const pythonPath = await ensurePythonEnv(["pylink-square"]);
     console.log(`[LogScope] Using Python: ${pythonPath}`);
 
     return new Promise<void>((resolve, reject) => {

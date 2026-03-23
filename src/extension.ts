@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { NrfutilRttTransport, discoverDevices } from "./transport/nrfutil-rtt";
+import { NrfutilRttTransport, discoverDevices, resolveSystemPython } from "./transport/nrfutil-rtt";
 import type { DiscoveredDevice } from "./transport/nrfutil-rtt";
 import { UartTransport, discoverSerialPorts } from "./transport/uart-serial";
 import { ZephyrLogParser } from "./parser/zephyr-log";
@@ -386,16 +386,17 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
     qp.items = [{ label: "Scanning..." }];
     const ports = await discoverSerialPorts();
     if (ports.length === 0) {
-      qp.items = [{ label: "No serial ports found" }];
+      qp.items = [{ label: "No serial ports found" }, { label: "$(refresh) Rescan", _rescan: true }];
       qp.busy = false;
       return;
     }
     qp.items = [
       ...ports.map(p => {
         // Primary label: "J-Link (Port 1)" or just "J-Link" or path basename
-        const name = p.description || p.path.split("/").pop() || p.path;
+        const basename = p.path.split("/").pop() || p.path.split("\\").pop() || p.path;
+        const name = p.description || basename;
         const primaryLabel = p.portNumber ? `${name} (Port ${p.portNumber})` : name;
-        // Detail line: "CDC — SN 001057721387 — /dev/cu.usbmodem..."
+        // Detail line: "CDC — SN 001057721387 — COM3"
         const details: string[] = [];
         if (p.manufacturer) details.push(p.manufacturer);
         if (p.serialNumber) details.push(`SN: ${p.serialNumber}`);
@@ -411,8 +412,6 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
     ];
     qp.busy = false;
   };
-
-  await scanPorts();
 
   return new Promise<{ path: string; label: string } | undefined>((resolve, reject) => {
     let resolved = false;
@@ -438,6 +437,9 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
       qp.dispose();
       if (!resolved) resolve(undefined);
     });
+
+    // Start scanning AFTER event handlers are registered so Back works during scan
+    scanPorts();
   });
 }
 
@@ -460,7 +462,7 @@ async function pickJlinkDevice(showBack = false): Promise<(DiscoveredDevice & { 
     const devices = await discoverDevices();
     lastDiscoveredDevices = devices;
     if (devices.length === 0) {
-      qp.items = [{ label: "No J-Link devices found" }];
+      qp.items = [{ label: "No J-Link devices found" }, { label: "$(refresh) Rescan", _rescan: true }];
       qp.busy = false;
       return;
     }
@@ -473,8 +475,6 @@ async function pickJlinkDevice(showBack = false): Promise<(DiscoveredDevice & { 
     ];
     qp.busy = false;
   };
-
-  await scanDevices();
 
   return new Promise<(DiscoveredDevice & { targetName?: string }) | undefined>((resolve, reject) => {
     let resolved = false;
@@ -501,6 +501,9 @@ async function pickJlinkDevice(showBack = false): Promise<(DiscoveredDevice & { 
       qp.dispose();
       if (!resolved) resolve(undefined);
     });
+
+    // Start scanning AFTER event handlers are registered so Back works during scan
+    scanDevices();
   });
 }
 
@@ -693,6 +696,26 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Initialize sidebar state from settings (sets context keys)
   sidebarProvider.initFromSettings();
+
+  // Check for Python on activation (non-blocking)
+  const PYTHON_WARNING_DISMISSED = "logscope.pythonWarningDismissed";
+  if (!context.globalState.get<boolean>(PYTHON_WARNING_DISMISSED)) {
+    try {
+      resolveSystemPython();
+    } catch {
+      vscode.window.showWarningMessage(
+        "LogScope requires Python 3 for device discovery and communication. Install Python and reload VS Code.",
+        "Download Python",
+        "Dismiss",
+      ).then(selection => {
+        if (selection === "Download Python") {
+          vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/"));
+        } else if (selection === "Dismiss") {
+          context.globalState.update(PYTHON_WARNING_DISMISSED, true);
+        }
+      });
+    }
+  }
 
   // Handle messages from WebView (viewer-only messages)
   panel.setMessageHandler(async (msg) => {

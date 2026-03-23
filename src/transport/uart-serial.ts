@@ -2,7 +2,7 @@ import { EventEmitter } from "events";
 import { ChildProcess, spawn } from "child_process";
 import * as path from "path";
 import type { Transport } from "./types";
-import { resolveSystemPython } from "./nrfutil-rtt";
+import { ensurePythonEnv } from "./nrfutil-rtt";
 
 /** Configuration for UART serial transport */
 export interface UartTransportConfig {
@@ -29,7 +29,7 @@ export interface DiscoveredSerialPort {
 export async function discoverSerialPorts(): Promise<DiscoveredSerialPort[]> {
   const helperPath = path.join(__dirname, "uart-helper.py");
 
-  const pythonPath = resolveSystemPython();
+  const pythonPath = await ensurePythonEnv(["pyserial"]);
   return new Promise((resolve) => {
     const proc = spawn(pythonPath, [helperPath, "discover"], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -90,9 +90,9 @@ export class UartTransport extends EventEmitter implements Transport {
     }
 
     const helperPath = path.join(__dirname, "uart-helper.py");
+    const pythonPath = await ensurePythonEnv(["pyserial"]);
 
     return new Promise<void>((resolve, reject) => {
-      const pythonPath = resolveSystemPython();
       const proc = spawn(pythonPath, [
         helperPath,
         this.portPath,

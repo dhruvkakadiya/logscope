@@ -332,6 +332,29 @@ def detect_device(nrfutil_path):
     return None, None
 
 
+def _parse_probe_label(emu):
+    """Extract a human-readable label from the J-Link emulator product string.
+
+    Note: For on-board J-Links (OB-*), the chip in the product string is the
+    DEBUGGER chip, not the target. E.g., "J-Link OB-nRF5340-NordicSemi" means
+    the debugger is an nRF5340, but the target could be an nRF54L15 or anything
+    else. So we return a probe description, not a target name.
+    """
+    try:
+        product = emu.acProduct
+        if isinstance(product, bytes):
+            product = product.decode("utf-8", errors="replace")
+        # Clean up the product string for display
+        # "J-Link OB-nRF5340-NordicSemi" → "J-Link OB"
+        # "J-Link EDU Mini" → "J-Link EDU Mini"
+        if "OB-" in product:
+            return "J-Link (On-Board)"
+        return product.strip() if product.strip() else None
+    except Exception:
+        pass
+    return None
+
+
 def run_discover():
     """Discover connected J-Link probes and output JSON to stdout."""
     import json
@@ -345,8 +368,15 @@ def run_discover():
     nrfutil_path = sys.argv[2] if len(sys.argv) > 2 else "nrfutil"
     target_jlink, target_friendly = detect_device(nrfutil_path)
 
-    jlink = pylink.JLink()
-    emulators = jlink.connected_emulators()
+    try:
+        jlink = pylink.JLink()
+        emulators = jlink.connected_emulators()
+    except Exception as e:
+        # J-Link DLL not found or other initialization error
+        print(f"J-Link init failed: {e}", file=sys.stderr)
+        print(json.dumps({"error": str(e), "devices": []}))
+        return
+
     devices = []
     for emu in emulators:
         serial = emu.SerialNumber
@@ -357,20 +387,25 @@ def run_discover():
             info["targetName"] = target_friendly
             info["device"] = target_jlink
         else:
-            # Fall back to generic core detection via pylink
+            # Get a human-readable probe label
+            probe_label = _parse_probe_label(emu)
+
+            # Connect via pylink to detect the core type
             try:
                 jlink.open(serial_no=serial)
                 for core in ["Cortex-M33", "Cortex-M4", "Cortex-M7", "Cortex-M0+"]:
                     try:
                         jlink.connect(core)
-                        info["targetName"] = jlink.core_name()
                         info["device"] = core
                         break
                     except Exception:
                         continue
+                # Show probe label + core, since we can't identify the actual target chip
+                # without nrfutil. E.g., "J-Link (On-Board)" or "J-Link EDU Mini"
+                info["targetName"] = probe_label or info.get("device", "Unknown device")
                 jlink.close()
             except Exception:
-                info["targetName"] = "Unknown device"
+                info["targetName"] = probe_label or "Unknown device"
                 try:
                     jlink.close()
                 except Exception:
