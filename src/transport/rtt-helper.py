@@ -179,6 +179,30 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
                 reconnect_stage = 0
             else:
                 silence = time.monotonic() - last_data_time
+                # Quick check: is the probe still physically connected?
+                if silence > SILENCE_THRESHOLD:
+                    try:
+                        probes = jlink.connected_emulators()
+                        probe_serials = [e.SerialNumber for e in probes]
+                        if serial_no and serial_no not in probe_serials:
+                            print(f"ERROR: Probe SN {serial_no} no longer connected (found: {probe_serials})", file=sys.stderr)
+                            sys.stderr.flush()
+                            try:
+                                jlink.close()
+                            except Exception:
+                                pass
+                            sys.exit(4)
+                        elif not probes:
+                            print("ERROR: No J-Link probes connected", file=sys.stderr)
+                            sys.stderr.flush()
+                            try:
+                                jlink.close()
+                            except Exception:
+                                pass
+                            sys.exit(4)
+                    except Exception:
+                        pass  # can't check — fall through to reconnect logic
+
                 if silence > SILENCE_THRESHOLD and reconnect_stage == 0:
                     # Stage 1: try lightweight RTT restart
                     restart_rtt()
