@@ -307,12 +307,15 @@ def run_nrfutil(rtt_addr, poll_ms, nrfutil_path):
         time.sleep(poll_interval)
 
 
-def detect_device(nrfutil_path):
+def detect_device(nrfutil_path, serial_no=None):
     """Try to auto-detect the connected device via nrfutil."""
     import subprocess
     try:
+        cmd = [nrfutil_path, "device", "device-info"]
+        if serial_no:
+            cmd.extend(["--serial-number", str(serial_no)])
         result = subprocess.run(
-            [nrfutil_path, "device", "device-info"],
+            cmd,
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.splitlines():
@@ -438,7 +441,7 @@ def main():
 
     # Auto-detect device if requested
     if device_or_addr == "auto":
-        jlink_name, friendly_name = detect_device(nrfutil_path)
+        jlink_name, friendly_name = detect_device(nrfutil_path, serial_no=serial_no)
         if jlink_name:
             print(f"DEVICE_DETECTED {friendly_name}", file=sys.stderr)
             sys.stderr.flush()
