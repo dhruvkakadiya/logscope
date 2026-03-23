@@ -76,24 +76,22 @@ def run_serial(port_path, baud_rate):
     sys.stderr.flush()
 
     stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
-    check_interval = 0
-    PORT_CHECK_EVERY = 10  # check port exists every ~1 second (10 × 0.1s timeout)
+    # Windows unplug detection is handled on the Node/TypeScript side
+    # (UartTransport.startPortWatcher) because ser.read() blocks indefinitely
+    # after unplug on Windows and no Python-side workaround reliably unblocks it.
+    # The extension kills this process when it detects the port has disappeared.
 
     while True:
         try:
             data = ser.read(4096)
             if data:
                 stdout.write(data)
-                check_interval = 0
             else:
-                check_interval += 1
-                # Periodically check if port still exists (macOS/Linux unplug detection)
-                if check_interval >= PORT_CHECK_EVERY:
-                    check_interval = 0
-                    if sys.platform != "win32" and not os.path.exists(port_path):
-                        print(f"ERROR: Port {port_path} disappeared — device unplugged", file=sys.stderr)
-                        sys.stderr.flush()
-                        break
+                # No data — on macOS/Linux check if port still exists
+                if sys.platform != "win32" and not os.path.exists(port_path):
+                    print(f"ERROR: Port {port_path} disappeared — device unplugged", file=sys.stderr)
+                    sys.stderr.flush()
+                    break
         except serial.SerialException as e:
             print(f"ERROR: Serial read failed: {e}", file=sys.stderr)
             sys.stderr.flush()
