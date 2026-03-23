@@ -327,6 +327,7 @@ function showStepQuickPick<T extends vscode.QuickPickItem>(
 async function guidedConnect(): Promise<void> {
   let step = 1;
   let transportValue: "rtt" | "uart" = "rtt";
+  let parserValue: "zephyr" | "nrf5" | "raw" = "zephyr";
   let port: { path: string; manufacturer?: string } | undefined;
 
   while (step > 0) {
@@ -334,27 +335,47 @@ async function guidedConnect(): Promise<void> {
       switch (step) {
         case 1: {
           // Pick transport
-          const totalSteps = 2;
           const pick = await showStepQuickPick(
             [
               { label: "$(circuit-board) J-Link RTT", description: "Real-Time Transfer via J-Link probe", value: "rtt" as const },
               { label: "$(plug) Serial UART", description: "USB CDC ACM or UART bridge", value: "uart" as const },
             ] as (vscode.QuickPickItem & { value: "rtt" | "uart" })[],
-            { placeholder: "Select transport", step: 1, totalSteps, title: "Connect Device" },
+            { placeholder: "Select transport", step: 1, totalSteps: transportValue === "uart" ? 4 : 3, title: "Connect Device" },
           );
-          if (!pick) return; // cancelled
+          if (!pick) return;
           transportValue = (pick as { value: "rtt" | "uart" }).value;
           step = 2;
           break;
         }
 
         case 2: {
+          // Pick parser
+          const totalSteps = transportValue === "uart" ? 4 : 3;
+          const pick = await showStepQuickPick(
+            [
+              { label: "$(file-code) Zephyr", description: "Zephyr RTOS — LOG_INF, LOG_ERR, LOG_WRN macros", value: "zephyr" as const },
+              { label: "$(file-code) nRF5 SDK", description: "nRF5 SDK — NRF_LOG_INFO, NRF_LOG_ERROR macros", value: "nrf5" as const },
+              { label: "$(file-code) Raw", description: "Any firmware — displays output as-is, no parsing", value: "raw" as const },
+            ] as (vscode.QuickPickItem & { value: "zephyr" | "nrf5" | "raw" })[],
+            { placeholder: "Select log format", step: 2, totalSteps, showBack: true, title: "Connect Device" },
+          );
+          if (!pick) return;
+          parserValue = (pick as { value: "zephyr" | "nrf5" | "raw" }).value;
+          const cfg = vscode.workspace.getConfiguration("logscope");
+          await cfg.update("parser", parserValue, vscode.ConfigurationTarget.Workspace);
+          sidebarProvider.updateState({ parser: parserValue });
+          step = 3;
+          break;
+        }
+
+        case 3: {
           // Pick device/port
+          const totalSteps = transportValue === "uart" ? 4 : 3;
           if (transportValue === "uart") {
-            const result = await pickSerialPort(true); // true = show back button
+            const result = await pickSerialPort(true);
             if (!result) return;
             port = result;
-            step = 3; // go to baud rate
+            step = 4; // go to baud rate
           } else {
             const device = await pickJlinkDevice(true);
             if (!device) return;
@@ -369,7 +390,7 @@ async function guidedConnect(): Promise<void> {
           break;
         }
 
-        case 3: {
+        case 4: {
           // Pick baud rate (UART only)
           const baudRate = await pickBaudRate(true);
           if (!baudRate) return;
