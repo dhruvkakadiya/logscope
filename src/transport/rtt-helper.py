@@ -14,7 +14,7 @@ import sys
 import os
 
 
-def run_pylink(device_or_addr, poll_ms):
+def run_pylink(device_or_addr, poll_ms, serial_no=None):
     """Fast path: native J-Link RTT via pylink. Works with any J-Link device."""
     import pylink
 
@@ -27,7 +27,13 @@ def run_pylink(device_or_addr, poll_ms):
         sys.stderr.flush()
         sys.exit(3)
 
-    jlink.open()
+    # Pass serial number to avoid probe selection dialog when multiple probes are connected
+    if serial_no:
+        print(f"Opening J-Link probe SN: {serial_no}", file=sys.stderr)
+        sys.stderr.flush()
+        jlink.open(serial_no=serial_no)
+    else:
+        jlink.open()
 
     # If it looks like a hex address, it's the nrfutil fallback format.
     # For pylink, we need a device name. Default to Cortex-M33 if address given.
@@ -428,6 +434,7 @@ def main():
 
     poll_ms = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     nrfutil_path = sys.argv[3] if len(sys.argv) > 3 else "nrfutil"
+    serial_no = int(sys.argv[4]) if len(sys.argv) > 4 else None
 
     # Auto-detect device if requested
     if device_or_addr == "auto":
@@ -446,7 +453,7 @@ def main():
         import pylink  # noqa: F401
         print("Using pylink (native J-Link RTT)", file=sys.stderr)
         sys.stderr.flush()
-        run_pylink(device_or_addr, poll_ms)
+        run_pylink(device_or_addr, poll_ms, serial_no=serial_no)
     except ImportError:
         print("pylink not available, falling back to nrfutil CLI", file=sys.stderr)
         sys.stderr.flush()

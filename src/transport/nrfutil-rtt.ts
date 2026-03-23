@@ -194,6 +194,8 @@ export async function discoverDevices(): Promise<DiscoveredDevice[]> {
 export interface RttTransportConfig {
   /** J-Link device name (e.g., "NRF54L15_M33", "STM32F407VG") or RTT address hex for nrfutil fallback */
   device: string;
+  /** J-Link probe serial number — prevents probe selection dialog when multiple probes are connected */
+  serialNumber?: string;
   /** Poll interval in ms (default 50) */
   pollIntervalMs?: number;
   /** Path to nrfutil binary for fallback (default: "nrfutil") */
@@ -208,12 +210,14 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
   detectedDevice: string | null = null;
 
   private readonly device: string;
+  private readonly serialNumber: string;
   private readonly pollIntervalMs: number;
   private readonly nrfutilPath: string;
 
   constructor(config: RttTransportConfig) {
     super();
     this.device = config.device;
+    this.serialNumber = config.serialNumber ?? "";
     this.pollIntervalMs = config.pollIntervalMs ?? 50;
     this.nrfutilPath = config.nrfutilPath ?? "nrfutil";
   }
@@ -228,12 +232,16 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
     console.log(`[LogScope] Using Python: ${pythonPath}`);
 
     return new Promise<void>((resolve, reject) => {
-      const proc = spawn(pythonPath, [
+      const args = [
         helperPath,
         this.device,
         String(this.pollIntervalMs),
         this.nrfutilPath,
-      ], {
+      ];
+      if (this.serialNumber) {
+        args.push(this.serialNumber);
+      }
+      const proc = spawn(pythonPath, args, {
         stdio: ["pipe", "pipe", "pipe"],
       });
 

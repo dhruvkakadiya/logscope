@@ -146,7 +146,7 @@ function disconnectAll(): void {
 
 // ── Connect helpers ─────────────────────────────────────────────
 
-async function connectRtt(device: string, pollInterval: number): Promise<void> {
+async function connectRtt(device: string, pollInterval: number, serialNumber?: string): Promise<void> {
   const cfg = getConfig();
   ringBuffer = new RingBuffer(cfg.maxEntries);
   session = new Session("device", "rtt");
@@ -154,6 +154,7 @@ async function connectRtt(device: string, pollInterval: number): Promise<void> {
 
   const rttTransport = new NrfutilRttTransport({
     device,
+    serialNumber,
     pollIntervalMs: pollInterval,
     nrfutilPath: cfg.nrfutilPath,
   });
@@ -225,7 +226,7 @@ async function doConnect(): Promise<void> {
       });
     } else {
       const pollInterval = getConfig().rttPollInterval;
-      await connectRtt("auto", pollInterval);
+      await connectRtt("auto", pollInterval, device);
       const rttTransport = transport as NrfutilRttTransport;
       const displayName = rttTransport.detectedDevice || "Connected";
       const devCfg = vscode.workspace.getConfiguration("logscope");

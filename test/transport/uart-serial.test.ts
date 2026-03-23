@@ -11,7 +11,15 @@ jest.mock("child_process", () => {
   };
 });
 
+// Mock ensurePythonEnv to avoid real Python resolution in tests
+jest.mock("../../src/transport/nrfutil-rtt", () => ({
+  ensurePythonEnv: jest.fn().mockResolvedValue("python3"),
+}));
+
 const mockSpawn = spawn as jest.MockedFunction<typeof spawn>;
+
+/** Wait for ensurePythonEnv mock to resolve before emitting process events */
+const tick = () => new Promise((r) => setTimeout(r, 10));
 
 function createMockProcess(): ChildProcess {
   const proc = new EventEmitter() as ChildProcess;
@@ -44,6 +52,8 @@ describe("UartTransport", () => {
     const t = new UartTransport({ port: "/dev/ttyACM0" });
     const connectPromise = t.connect();
 
+    // Wait for ensurePythonEnv to resolve and spawn to be called
+    await new Promise((r) => setTimeout(r, 10));
     proc.stderr!.emit("data", Buffer.from("SERIAL_READY port=/dev/ttyACM0 baud=115200\n"));
 
     await connectPromise;
@@ -56,6 +66,7 @@ describe("UartTransport", () => {
 
     const t = new UartTransport({ port: "/dev/ttyACM0" });
     const connectPromise = t.connect();
+    await tick();
     proc.stderr!.emit("data", Buffer.from("SERIAL_READY port=/dev/ttyACM0 baud=115200\n"));
     await connectPromise;
 
@@ -71,7 +82,7 @@ describe("UartTransport", () => {
 
     const t = new UartTransport({ port: "/dev/ttyACM0" });
     const connectPromise = t.connect();
-
+    await tick();
     proc.stderr!.emit("data", Buffer.from("ERROR: No such port /dev/ttyACM0\n"));
 
     await expect(connectPromise).rejects.toThrow("No such port");
@@ -83,6 +94,7 @@ describe("UartTransport", () => {
 
     const t = new UartTransport({ port: "/dev/ttyACM0" });
     const connectPromise = t.connect();
+    await tick();
     proc.stderr!.emit("data", Buffer.from("SERIAL_READY\n"));
     await connectPromise;
 
@@ -102,6 +114,7 @@ describe("UartTransport", () => {
 
     const t = new UartTransport({ port: "/dev/ttyACM0" });
     const connectPromise = t.connect();
+    await tick();
     proc.stderr!.emit("data", Buffer.from("SERIAL_READY\n"));
     await connectPromise;
 
@@ -114,6 +127,7 @@ describe("UartTransport", () => {
 
     const t = new UartTransport({ port: "/dev/ttyACM0" });
     const connectPromise = t.connect();
+    await tick();
     proc.stderr!.emit("data", Buffer.from("SERIAL_READY\n"));
     await connectPromise;
 
@@ -134,6 +148,7 @@ describe("discoverSerialPorts", () => {
     mockSpawn.mockReturnValue(proc);
 
     const promise = discoverSerialPorts();
+    await tick();
 
     const response = JSON.stringify({
       ports: [
@@ -155,6 +170,7 @@ describe("discoverSerialPorts", () => {
     mockSpawn.mockReturnValue(proc);
 
     const promise = discoverSerialPorts();
+    await tick();
     proc.emit("error", new Error("spawn failed"));
 
     const ports = await promise;
