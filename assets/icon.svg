@@ -1,11 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Log lines (dimmed) -->
-  <line x1="3" y1="5" x2="13" y2="5" opacity="0.3"/>
-  <line x1="3" y1="8" x2="10" y2="8" opacity="0.3"/>
-  <line x1="3" y1="11" x2="14" y2="11" opacity="0.3"/>
-  <line x1="3" y1="14" x2="11" y2="14" opacity="0.3"/>
-  <line x1="3" y1="17" x2="9" y2="17" opacity="0.3"/>
-  <!-- Magnifying glass -->
-  <circle cx="14" cy="12" r="6"/>
-  <line x1="18.5" y1="16.5" x2="21" y2="19" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 3 rows × 3 columns: two short dashes then a long line -->
+  <!-- Col 1: x=1-3 | gap | Col 2: x=6-8 | big gap | Col 3: x=12+ -->
+
+  <!-- Row 1 -->
+  <line x1="1" y1="6" x2="3" y2="6"/>
+  <line x1="6" y1="6" x2="8" y2="6"/>
+  <line x1="12" y1="6" x2="23" y2="6" opacity="0.5"/>
+
+  <!-- Row 2 -->
+  <line x1="1" y1="12" x2="3" y2="12"/>
+  <line x1="6" y1="12" x2="8" y2="12"/>
+  <line x1="12" y1="12" x2="18" y2="12" opacity="0.5"/>
+
+  <!-- Row 3 -->
+  <line x1="1" y1="18" x2="3" y2="18"/>
+  <line x1="6" y1="18" x2="8" y2="18"/>
+  <line x1="12" y1="18" x2="21" y2="18" opacity="0.5"/>
 </svg>
