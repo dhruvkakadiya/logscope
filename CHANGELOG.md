@@ -2,6 +2,12 @@
 
 All notable changes to LogScope will be documented in this file.
 
+## [0.2.4] — 2026-03-23
+
+### Fixed
+- Fix device scanning on Windows — Python resolution now tries both `python` and `python3` across all platforms
+- UART transport no longer hardcodes `python3` (broken on Windows where only `python` exists)
+
 ## [0.2.3] — 2026-03-21
 
 ### Changed
