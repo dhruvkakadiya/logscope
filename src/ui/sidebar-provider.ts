@@ -215,16 +215,20 @@ export class LogScopeSidebarProvider implements vscode.TreeDataProvider<SidebarI
     }
 
     const parserLabels: Record<string, string> = { zephyr: "Zephyr", nrf5: "nRF5 SDK", raw: "Raw" };
-    items.push(
-      SidebarItem.info("Parser", "file-code", parserLabels[this.state.parser] || "Zephyr"),
-      SidebarItem.separator(),
-      SidebarItem.action("Reconnect", "debug-start", "logscope.reconnect"),
-      SidebarItem.action("Change Settings", "settings-gear", "logscope.changeSettings"),
-      SidebarItem.action("Connect New Device", "plug", "logscope.connect"),
-      SidebarItem.separator(),
-      SidebarItem.action("Get Started Guide", "book", "logscope.openWalkthrough"),
-      SidebarItem.link("Help & Feedback", "globe", "https://novelbits.io/logscope"),
-    );
+    items.push(SidebarItem.info("Parser", "file-code", parserLabels[this.state.parser] || "Zephyr"));
+
+    items.push(SidebarItem.separator());
+
+    items.push(SidebarItem.action("Reconnect", "debug-start", "logscope.reconnect"));
+    items.push(SidebarItem.action("Change Settings", "settings-gear", "logscope.changeSettings"));
+    items.push(SidebarItem.action("Connect New Device", "plug", "logscope.connect"));
+
+    items.push(SidebarItem.separator());
+    items.push(SidebarItem.action("Get Started Guide", "book", "logscope.openWalkthrough"));
+    const docsItem = SidebarItem.link("Documentation", "globe", "https://novelbits.io/logscope");
+    docsItem.description = "by Novel Bits";
+    items.push(docsItem);
+    items.push(SidebarItem.link("Report Issue", "github", "https://github.com/NovelBits/logscope/issues"));
 
     return items;
   }

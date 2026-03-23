@@ -2,9 +2,7 @@ import { EventEmitter } from "node:events";
 import { ChildProcess, spawn } from "node:child_process";
 import * as path from "node:path";
 import type { Transport } from "./types";
-
-// Reuse the same Python environment setup from the RTT transport
-// (ensurePythonWithPylink checks for system python3 or managed venv)
+import { ensurePythonEnv } from "./nrfutil-rtt";
 
 /** Configuration for UART serial transport */
 export interface UartTransportConfig {
@@ -31,8 +29,9 @@ export interface DiscoveredSerialPort {
 export async function discoverSerialPorts(): Promise<DiscoveredSerialPort[]> {
   const helperPath = path.join(__dirname, "uart-helper.py");
 
+  const pythonPath = await ensurePythonEnv(["pyserial"]);
   return new Promise((resolve) => {
-    const proc = spawn("python3", [helperPath, "discover"], {
+    const proc = spawn(pythonPath, [helperPath, "discover"], {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 10_000,
     });
@@ -72,6 +71,7 @@ export async function discoverSerialPorts(): Promise<DiscoveredSerialPort[]> {
 export class UartTransport extends EventEmitter implements Transport {
   private _connected = false;
   private helper: ChildProcess | null = null;
+  private portWatcher: ReturnType<typeof setInterval> | null = null;
   private readonly portPath: string;
   private readonly baudRate: number;
 
@@ -91,9 +91,10 @@ export class UartTransport extends EventEmitter implements Transport {
     }
 
     const helperPath = path.join(__dirname, "uart-helper.py");
+    const pythonPath = await ensurePythonEnv(["pyserial"]);
 
     return new Promise<void>((resolve, reject) => {
-      const proc = spawn("python3", [
+      const proc = spawn(pythonPath, [
         helperPath,
         this.portPath,
         String(this.baudRate),
@@ -120,6 +121,11 @@ export class UartTransport extends EventEmitter implements Transport {
           resolved = true;
           this._connected = true;
           this.emit("connected");
+          // Start monitoring for port disappearance (Windows unplug detection).
+          // On Windows, ser.read() blocks indefinitely after unplug and the
+          // Python process never exits, so we detect it from the Node side
+          // by re-scanning ports every 2 seconds.
+          this.startPortWatcher();
           resolve();
         }
 
@@ -171,7 +177,35 @@ export class UartTransport extends EventEmitter implements Transport {
     });
   }
 
+  private startPortWatcher(): void {
+    if (process.platform !== "win32") return; // macOS/Linux handle this in the Python helper
+    this.portWatcher = setInterval(async () => {
+      if (!this._connected) {
+        this.stopPortWatcher();
+        return;
+      }
+      try {
+        const ports = await discoverSerialPorts();
+        const portPaths = ports.map(p => p.path);
+        if (!portPaths.includes(this.portPath)) {
+          console.log(`[LogScope] Port ${this.portPath} disappeared — device unplugged`);
+          this.disconnect();
+        }
+      } catch {
+        // Scan failed — ignore
+      }
+    }, 2000);
+  }
+
+  private stopPortWatcher(): void {
+    if (this.portWatcher) {
+      clearInterval(this.portWatcher);
+      this.portWatcher = null;
+    }
+  }
+
   disconnect(): void {
+    this.stopPortWatcher();
     if (this.helper) {
       this.helper.kill();
       this.helper = null;

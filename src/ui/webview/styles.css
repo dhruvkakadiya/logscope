@@ -342,6 +342,10 @@ body { display: flex; flex-direction: column; }
 #viewer.raw-mode .log-row .sev { display: none; }
 #viewer.raw-mode .log-row .mod { display: none; }
 
+/* ── No device timestamps: hide .ts for nRF5/Raw parsers ── */
+#viewer.no-device-ts #column-headers .col-ts { display: none; }
+#viewer.no-device-ts .log-row .ts { display: none; }
+
 /* ── Wrap mode ──────────────────────────────────────────── */
 #timeline.wrap-mode .log-row { white-space: normal; }
 #timeline.wrap-mode .log-row .msg { white-space: normal; word-break: break-word; overflow: visible; text-overflow: unset; }

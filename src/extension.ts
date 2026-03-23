@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { NrfutilRttTransport, discoverDevices } from "./transport/nrfutil-rtt";
+import { NrfutilRttTransport, discoverDevices, resolveSystemPython } from "./transport/nrfutil-rtt";
 import type { DiscoveredDevice } from "./transport/nrfutil-rtt";
 import { UartTransport, discoverSerialPorts } from "./transport/uart-serial";
 import { ZephyrLogParser } from "./parser/zephyr-log";
@@ -42,6 +42,15 @@ function getConfig() {
     rttPollInterval: cfg.get<number>("rtt.pollInterval", 50),
     logWrap: cfg.get<boolean>("logWrap", false),
   };
+}
+
+/** Save a logscope setting — uses workspace scope when a folder is open, global otherwise. */
+async function saveSetting(key: string, value: unknown): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration("logscope");
+  const target = vscode.workspace.workspaceFolders
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await cfg.update(key, value, target);
 }
 
 
@@ -157,21 +166,42 @@ function disconnectAll(): void {
 
 // ── Connect helpers ─────────────────────────────────────────────
 
-async function connectRtt(device: string, pollInterval: number): Promise<void> {
+async function connectRtt(device: string, pollInterval: number, serialNumber?: string): Promise<void> {
   const cfg = getConfig();
   ringBuffer = new RingBuffer(cfg.maxEntries);
   session = new Session("device", "rtt");
   lineBuffer = "";
 
-  const rttTransport = new NrfutilRttTransport({
-    device,
-    pollIntervalMs: pollInterval,
-    nrfutilPath: cfg.nrfutilPath,
-  });
-  transport = rttTransport;
-  wireTransportEvents(rttTransport);
-  await rttTransport.connect();
-  startStatusUpdates();
+  const MAX_RETRIES = 2;
+  const RETRY_DELAY_MS = 2000;
+  let lastErr: Error | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[LogScope] RTT connect retry ${attempt}/${MAX_RETRIES} after ${RETRY_DELAY_MS}ms...`);
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    }
+
+    const rttTransport = new NrfutilRttTransport({
+      device,
+      serialNumber,
+      pollIntervalMs: pollInterval,
+      nrfutilPath: cfg.nrfutilPath,
+    });
+    transport = rttTransport;
+    wireTransportEvents(rttTransport);
+
+    try {
+      await rttTransport.connect();
+      startStatusUpdates();
+      return;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      rttTransport.disconnect();
+    }
+  }
+
+  throw lastErr ?? new Error("RTT connection failed");
 }
 
 async function connectUart(portPath: string, baudRate: number): Promise<void> {
@@ -193,9 +223,8 @@ let connectInFlight = false;
 
 async function connectAndShowUart(device: string, baudRate: number, parserMode: string): Promise<void> {
   await connectUart(device, baudRate);
-  const devCfg = vscode.workspace.getConfiguration("logscope");
-  await devCfg.update("uart.lastPort", device, vscode.ConfigurationTarget.Workspace);
-  await devCfg.update("transport", "uart", vscode.ConfigurationTarget.Workspace);
+  await saveSetting("uart.lastPort", device);
+  await saveSetting("transport", "uart");
 
   const cfg = getConfig();
   panel?.show(cfg.logWrap);
@@ -212,9 +241,8 @@ async function connectAndShowRtt(device: string, parserMode: string): Promise<vo
   await connectRtt("auto", pollInterval);
   const rttTransport = transport as NrfutilRttTransport;
   const displayName = rttTransport.detectedDevice || "Connected";
-  const devCfg = vscode.workspace.getConfiguration("logscope");
-  await devCfg.update("lastDevice", device, vscode.ConfigurationTarget.Workspace);
-  await devCfg.update("transport", "rtt", vscode.ConfigurationTarget.Workspace);
+  await saveSetting("lastDevice", device);
+  await saveSetting("transport", "rtt");
 
   const cfg = getConfig();
   panel?.show(cfg.logWrap);
@@ -361,8 +389,7 @@ async function guidedConnect(): Promise<void> {
           );
           if (!pick) return;
           parserValue = (pick as { value: "zephyr" | "nrf5" | "raw" }).value;
-          const cfg = vscode.workspace.getConfiguration("logscope");
-          await cfg.update("parser", parserValue, vscode.ConfigurationTarget.Workspace);
+          await saveSetting("parser", parserValue);
           sidebarProvider.updateState({ parser: parserValue });
           step = 3;
           break;
@@ -439,16 +466,17 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
     qp.items = [{ label: "Scanning..." }];
     const ports = await discoverSerialPorts();
     if (ports.length === 0) {
-      qp.items = [{ label: "No serial ports found" }];
+      qp.items = [{ label: "No serial ports found" }, { label: "$(refresh) Rescan", _rescan: true }];
       qp.busy = false;
       return;
     }
     qp.items = [
       ...ports.map(p => {
         // Primary label: "J-Link (Port 1)" or just "J-Link" or path basename
-        const name = p.description || p.path.split("/").pop() || p.path;
+        const basename = p.path.split("/").pop() || p.path.split("\\").pop() || p.path;
+        const name = p.description || basename;
         const primaryLabel = p.portNumber ? `${name} (Port ${p.portNumber})` : name;
-        // Detail line: "CDC — SN 001057721387 — /dev/cu.usbmodem..."
+        // Detail line: "CDC — SN 001057721387 — COM3"
         const details: string[] = [];
         if (p.manufacturer) details.push(p.manufacturer);
         if (p.serialNumber) details.push(`SN: ${p.serialNumber}`);
@@ -464,8 +492,6 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
     ];
     qp.busy = false;
   };
-
-  await scanPorts();
 
   return new Promise<{ path: string; label: string } | undefined>((resolve, reject) => {
     let resolved = false;
@@ -491,6 +517,9 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
       qp.dispose();
       if (!resolved) resolve(undefined);
     });
+
+    // Start scanning AFTER event handlers are registered so Back works during scan
+    scanPorts();
   });
 }
 
@@ -513,7 +542,7 @@ async function pickJlinkDevice(showBack = false): Promise<(DiscoveredDevice & { 
     const devices = await discoverDevices();
     lastDiscoveredDevices = devices;
     if (devices.length === 0) {
-      qp.items = [{ label: "No J-Link devices found" }];
+      qp.items = [{ label: "No J-Link devices found" }, { label: "$(refresh) Rescan", _rescan: true }];
       qp.busy = false;
       return;
     }
@@ -526,8 +555,6 @@ async function pickJlinkDevice(showBack = false): Promise<(DiscoveredDevice & { 
     ];
     qp.busy = false;
   };
-
-  await scanDevices();
 
   return new Promise<(DiscoveredDevice & { targetName?: string }) | undefined>((resolve, reject) => {
     let resolved = false;
@@ -554,6 +581,9 @@ async function pickJlinkDevice(showBack = false): Promise<(DiscoveredDevice & { 
       qp.dispose();
       if (!resolved) resolve(undefined);
     });
+
+    // Start scanning AFTER event handlers are registered so Back works during scan
+    scanDevices();
   });
 }
 
@@ -598,14 +628,13 @@ async function changeTransport(): Promise<void> {
     selectedDevice: "",
     selectedDeviceLabel: "",
   });
-  const cfg = vscode.workspace.getConfiguration("logscope");
-  await cfg.update("transport", newTransport, vscode.ConfigurationTarget.Workspace);
+  await saveSetting("transport", newTransport);
   // After changing transport, prompt to pick a device
   if (newTransport === "uart") {
     const port = await pickSerialPort(true);
     if (port) {
       sidebarProvider.updateState({ selectedDevice: port.path, selectedDeviceLabel: port.label });
-      await cfg.update("uart.lastPort", port.path, vscode.ConfigurationTarget.Workspace);
+      await saveSetting("uart.lastPort", port.path);
     }
   } else {
     const device = await pickJlinkDevice(true);
@@ -614,18 +643,17 @@ async function changeTransport(): Promise<void> {
         selectedDevice: String(device.serial),
         selectedDeviceLabel: `${device.targetName || "Unknown"} (SN: ${device.serial})`,
       });
-      await cfg.update("lastDevice", String(device.serial), vscode.ConfigurationTarget.Workspace);
+      await saveSetting("lastDevice", String(device.serial));
     }
   }
 }
 
 async function changeDevice(): Promise<void> {
-  const cfg = vscode.workspace.getConfiguration("logscope");
   if (sidebarProvider.currentTransport === "uart") {
     const port = await pickSerialPort(true);
     if (port) {
       sidebarProvider.updateState({ selectedDevice: port.path, selectedDeviceLabel: port.label });
-      await cfg.update("uart.lastPort", port.path, vscode.ConfigurationTarget.Workspace);
+      await saveSetting("uart.lastPort", port.path);
     }
   } else {
     const device = await pickJlinkDevice(true);
@@ -634,7 +662,7 @@ async function changeDevice(): Promise<void> {
         selectedDevice: String(device.serial),
         selectedDeviceLabel: `${device.targetName || "Unknown"} (SN: ${device.serial})`,
       });
-      await cfg.update("lastDevice", String(device.serial), vscode.ConfigurationTarget.Workspace);
+      await saveSetting("lastDevice", String(device.serial));
     }
   }
 }
@@ -643,8 +671,7 @@ async function changeBaudRate(): Promise<void> {
   const rate = await pickBaudRate(true);
   if (rate) {
     sidebarProvider.updateState({ baudRate: rate });
-    const cfg = vscode.workspace.getConfiguration("logscope");
-    await cfg.update("uart.baudRate", rate, vscode.ConfigurationTarget.Workspace);
+    await saveSetting("uart.baudRate", rate);
   }
 }
 
@@ -667,8 +694,7 @@ async function changeParser(currentParser: string): Promise<void> {
   if (!parserPick) return;
   const selected = (parserPick as { value: string }).value;
   if (selected === currentParser) return;
-  const cfg = vscode.workspace.getConfiguration("logscope");
-  await cfg.update("parser", selected, vscode.ConfigurationTarget.Workspace);
+  await saveSetting("parser", selected);
   sidebarProvider.updateState({ parser: selected as "zephyr" | "nrf5" | "raw" });
 
   // If connected, offer to reconnect so the new parser takes effect
@@ -765,7 +791,7 @@ async function doExport(): Promise<void> {
   if (formatValue === "btsnoop") {
     const hciCount = entries.filter(e => e.source === "hci" && e.raw && e.metadata?.opcode).length;
     if (hciCount === 0) {
-      vscode.window.showWarningMessage("LogScope: No HCI packets to export. Connect a Bluetooth LE device to generate HCI traffic.");
+      vscode.window.showWarningMessage("LogScope: No HCI packets captured. To export btsnoop, enable the Bluetooth LE monitor (bt_monitor) in your firmware and connect via J-Link RTT.");
       return;
     }
     const uri = await vscode.window.showSaveDialog({
@@ -804,6 +830,26 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize sidebar state from settings (sets context keys)
   sidebarProvider.initFromSettings();
 
+  // Check for Python on activation (non-blocking)
+  const PYTHON_WARNING_DISMISSED = "logscope.pythonWarningDismissed";
+  if (!context.globalState.get<boolean>(PYTHON_WARNING_DISMISSED)) {
+    try {
+      resolveSystemPython();
+    } catch {
+      vscode.window.showWarningMessage(
+        "LogScope requires Python 3 for device discovery and communication. Install Python and reload VS Code.",
+        "Download Python",
+        "Dismiss",
+      ).then(selection => {
+        if (selection === "Download Python") {
+          vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/"));
+        } else if (selection === "Dismiss") {
+          context.globalState.update(PYTHON_WARNING_DISMISSED, true);
+        }
+      });
+    }
+  }
+
   // Handle messages from WebView (viewer-only messages)
   panel.setMessageHandler(async (msg) => {
     switch (msg.type) {
@@ -827,9 +873,8 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       case "updateSetting": {
-        const cfgSection = vscode.workspace.getConfiguration("logscope");
         const key = (msg.key as string).replace("logscope.", "");
-        await cfgSection.update(key, msg.value, vscode.ConfigurationTarget.Workspace);
+        await saveSetting(key, msg.value);
         break;
       }
 

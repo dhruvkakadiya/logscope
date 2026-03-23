@@ -24,9 +24,9 @@ def run_discover():
     raw_ports = []
     for p in serial.tools.list_ports.comports():
         path = p.device
-        # Filter out Bluetooth and debug ports
-        lower = path.lower()
-        if "bluetooth" in lower or "debug" in lower:
+        # Filter out Bluetooth and debug ports (check path, description, and hwid)
+        searchable = f"{path} {p.description or ''} {p.hwid or ''}".lower()
+        if "bluetooth" in searchable or "bthenum" in searchable or "debug" in searchable:
             continue
         raw_ports.append({
             "path": path,
@@ -34,16 +34,19 @@ def run_discover():
             "serialNumber": p.serial_number or None,
             "description": p.description if p.description and p.description != "n/a" else None,
             "product": p.product or None,
+            "_location": p.location or "",
         })
 
     # Assign port numbers for devices with multiple CDC interfaces (same serial)
-    # Group by serial number, sort by path, assign Port 1, Port 2, etc.
+    # Group by serial number, sort by USB interface number for consistent
+    # ordering across platforms (Windows COM numbers don't match USB order).
     from collections import Counter
     serial_counts = Counter(p["serialNumber"] for p in raw_ports if p["serialNumber"])
     serial_indices = {}  # serial -> next port number
 
-    # Sort by path so port numbering is deterministic
-    raw_ports.sort(key=lambda p: p["path"])
+    # Sort by USB location (interface number) so port numbering is consistent
+    # across Windows/macOS/Linux. Falls back to path if location is unavailable.
+    raw_ports.sort(key=lambda p: (p["_location"] or p["path"]))
 
     ports = []
     for p in raw_ports:
@@ -52,6 +55,7 @@ def run_discover():
             idx = serial_indices.get(sn, 1)
             serial_indices[sn] = idx + 1
             p["portNumber"] = idx
+        p.pop("_location", None)
         ports.append(p)
 
     print(json.dumps({"ports": ports}))
@@ -72,17 +76,31 @@ def run_serial(port_path, baud_rate):
     sys.stderr.flush()
 
     stdout = os.fdopen(sys.stdout.fileno(), "wb", 0)
+    # Windows unplug detection is handled on the Node/TypeScript side
+    # (UartTransport.startPortWatcher) because ser.read() blocks indefinitely
+    # after unplug on Windows and no Python-side workaround reliably unblocks it.
+    # The extension kills this process when it detects the port has disappeared.
 
     while True:
         try:
             data = ser.read(4096)
             if data:
                 stdout.write(data)
+            else:
+                # No data — on macOS/Linux check if port still exists
+                if sys.platform != "win32" and not os.path.exists(port_path):
+                    print(f"ERROR: Port {port_path} disappeared — device unplugged", file=sys.stderr)
+                    sys.stderr.flush()
+                    break
         except serial.SerialException as e:
             print(f"ERROR: Serial read failed: {e}", file=sys.stderr)
             sys.stderr.flush()
             break
         except BrokenPipeError:
+            break
+        except OSError as e:
+            print(f"ERROR: Port error: {e}", file=sys.stderr)
+            sys.stderr.flush()
             break
 
     ser.close()

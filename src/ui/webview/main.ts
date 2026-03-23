@@ -564,6 +564,9 @@ function handleConnectedMessage(msg: { address?: string; transport?: string; par
   // Raw mode: hide severity toggles, module picker, timestamp toggle
   const isRawMode = msg.parserMode === "raw";
   viewerEl.classList.toggle("raw-mode", isRawMode);
+  // nRF5 and Raw parsers don't produce device timestamps — hide the column
+  const noDeviceTs = msg.parserMode === "nrf5" || msg.parserMode === "raw";
+  viewerEl.classList.toggle("no-device-ts", noDeviceTs);
   const severityToggles = document.getElementById("severity-toggles")!;
   const modulePicker = document.getElementById("module-picker")!;
   severityToggles.style.display = isRawMode ? "none" : "";
