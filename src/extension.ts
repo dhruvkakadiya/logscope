@@ -238,7 +238,7 @@ async function connectAndShowUart(device: string, baudRate: number, parserMode: 
 
 async function connectAndShowRtt(device: string, parserMode: string): Promise<void> {
   const pollInterval = getConfig().rttPollInterval;
-  await connectRtt("auto", pollInterval);
+  await connectRtt("auto", pollInterval, device);
   const rttTransport = transport as NrfutilRttTransport;
   const displayName = rttTransport.detectedDevice || "Connected";
   await saveSetting("lastDevice", device);

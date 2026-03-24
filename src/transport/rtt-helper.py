@@ -83,6 +83,20 @@ def _create_jlink():
     return pylink.JLink()
 
 
+def _open_jlink(jlink, serial_no=None):
+    """Open a J-Link probe and suppress all DLL dialog boxes.
+
+    disable_dialog_boxes() uses JLINK_ExecCommand which only works AFTER
+    JLINKARM_Open(). Calling it before open() silently fails, leaving dialogs
+    enabled. This wrapper ensures the correct order: open first, then suppress.
+    """
+    if serial_no:
+        jlink.open(serial_no=serial_no)
+    else:
+        jlink.open()
+    jlink.disable_dialog_boxes()
+
+
 def run_pylink(device_or_addr, poll_ms, serial_no=None):
     """Fast path: native J-Link RTT via pylink. Works with any J-Link device."""
     import pylink
@@ -100,9 +114,7 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
     if serial_no:
         print(f"Opening J-Link probe SN: {serial_no}", file=sys.stderr)
         sys.stderr.flush()
-        jlink.open(serial_no=serial_no)
-    else:
-        jlink.open()
+    _open_jlink(jlink, serial_no=serial_no)
 
     # If it looks like a hex address, it's the nrfutil fallback format.
     # For pylink, we need a device name. Default to Cortex-M33 if address given.
@@ -185,10 +197,7 @@ def run_pylink(device_or_addr, poll_ms, serial_no=None):
             pass
         time.sleep(0.5)
         try:
-            if serial_no:
-                jlink.open(serial_no=serial_no)
-            else:
-                jlink.open()
+            _open_jlink(jlink, serial_no=serial_no)
             jlink.connect(device)
             if jlink.halted():
                 jlink.restart()
@@ -539,8 +548,10 @@ def _get_candidate_devices(jlink):
         for i in range(jlink.num_supported_devices()):
             info = jlink.supported_device(i)
             name = info.name
-            # Only include M33 and XXAA variants (main application cores)
-            if not (name.endswith("_M33") or name.endswith("_XXAA") or name.endswith("_XXAB")):
+            # Only include M33 and xxAA/xxAB variants (main application cores).
+            # The SDK uses mixed case (e.g. "nRF52840_xxAA"), so compare lowercase.
+            name_upper = name.upper()
+            if not (name_upper.endswith("_M33") or name_upper.endswith("_XXAA") or name_upper.endswith("_XXAB")):
                 continue
             for pattern in priority_patterns:
                 if name.startswith(pattern) and name not in found:
@@ -561,9 +572,7 @@ def run_discover():
         print(json.dumps({"error": "pylink not installed", "devices": []}))
         return
 
-    # First, try nrfutil to get the actual target chip name
     nrfutil_path = sys.argv[2] if len(sys.argv) > 2 else "nrfutil"
-    target_jlink, target_friendly = detect_device(nrfutil_path)
 
     try:
         jlink = _create_jlink()
@@ -578,46 +587,30 @@ def run_discover():
     for emu in emulators:
         serial = emu.SerialNumber
         info = {"serial": serial}
+        probe_label = _parse_probe_label(emu)
 
+        # Step 1: Try nrfutil to identify this probe's target chip.
+        # nrfutil runs as a subprocess with its own J-Link DLL instance, so
+        # --serial-number is needed to avoid the probe selection dialog.
+        target_jlink, target_friendly = detect_device(nrfutil_path, serial_no=serial)
         if target_friendly:
-            # nrfutil identified the target chip (e.g., "nRF54L15")
             info["targetName"] = target_friendly
             info["device"] = target_jlink
         else:
-            # Get a human-readable probe label
-            probe_label = _parse_probe_label(emu)
-
-            # Try to identify the target by connecting with specific device names
-            # from the J-Link database, then fall back to generic core names.
-            # Using a specific device name (e.g., "nRF54L15_M33") is critical —
-            # it tells the J-Link the exact RAM layout so RTT auto-detection works.
-            specific_devices = _get_candidate_devices(jlink)
-            generic_cores = ["Cortex-M33", "Cortex-M4", "Cortex-M7", "Cortex-M0+"]
-
+            # Step 2: nrfutil couldn't identify — use pylink to detect core type.
+            # We connect with generic core names (Cortex-M33, Cortex-M4, etc.)
+            # since jlink.connect() doesn't validate device names and can't
+            # distinguish same-core devices (e.g. nRF52840 vs nRF52832).
             try:
-                jlink.open(serial_no=serial)
-
-                # Try specific devices first (gives us chip name + correct RAM map)
-                for dev in specific_devices:
+                _open_jlink(jlink, serial_no=serial)
+                for core in ["Cortex-M33", "Cortex-M4", "Cortex-M7", "Cortex-M0+"]:
                     try:
-                        jlink.connect(dev)
-                        info["device"] = dev
-                        # Extract friendly name: "nRF54L15_M33" → "nRF54L15"
-                        info["targetName"] = dev.rsplit("_", 1)[0]
+                        jlink.connect(core)
+                        info["device"] = core
                         break
                     except Exception:
                         continue
-                else:
-                    # Fall back to generic core names
-                    for core in generic_cores:
-                        try:
-                            jlink.connect(core)
-                            info["device"] = core
-                            break
-                        except Exception:
-                            continue
-                    info["targetName"] = probe_label or info.get("device", "Unknown device")
-
+                info["targetName"] = probe_label or info.get("device", "Unknown device")
                 jlink.close()
             except Exception:
                 info["targetName"] = probe_label or "Unknown device"
@@ -660,10 +653,7 @@ def main():
             try:
                 import pylink
                 probe = _create_jlink()
-                if serial_no:
-                    probe.open(serial_no=serial_no)
-                else:
-                    probe.open()
+                _open_jlink(probe, serial_no=serial_no)
                 for dev in _get_candidate_devices(probe):
                     try:
                         probe.connect(dev)
