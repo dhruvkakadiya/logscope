@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import type { Transport } from "./types";
+import { TransportError } from "../errors";
 
 /** Directory for LogScope's auto-managed Python venv */
 const LOGSCOPE_VENV_DIR = path.join(os.homedir(), ".logscope", "venv");
@@ -205,6 +206,7 @@ export interface RttTransportConfig {
 export class NrfutilRttTransport extends EventEmitter implements Transport {
   private _connected = false;
   private helper: ChildProcess | null = null;
+  private lastErrorLine = "";
 
   /** The device name actually used (may differ from config if auto-detected) */
   detectedDevice: string | null = null;
@@ -227,6 +229,7 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
   }
 
   async connect(): Promise<void> {
+    this.lastErrorLine = "";
     const helperPath = path.join(__dirname, "rtt-helper.py");
     const pythonPath = await ensurePythonEnv(["pylink-square"]);
     console.log(`[LogScope] Using Python: ${pythonPath}`);
@@ -283,7 +286,8 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
         if (!resolved && stderrBuf.includes("ERROR:")) {
           resolved = true;
           const errLine = stderrBuf.split("\n").find(l => l.includes("ERROR:")) ?? "Unknown error";
-          reject(new Error(errLine));
+          this.lastErrorLine = errLine;
+          reject(new TransportError(errLine));
         }
       });
 
@@ -321,9 +325,20 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
 
         if (!resolved) {
           resolved = true;
-          reject(new Error(`RTT helper exited with code ${code} before connecting`));
+          reject(new TransportError(
+            this.lastErrorLine || `RTT helper exited with code ${code}`,
+            code ?? undefined,
+          ));
         } else if (wasConnected) {
-          this.emit("disconnected");
+          let reason: string | undefined;
+          if (code === 4) {
+            if (this.lastErrorLine?.includes("no longer connected") || this.lastErrorLine?.includes("No J-Link probes")) {
+              reason = "PROBE_UNPLUGGED";
+            } else {
+              reason = "RECONNECT_FAILED";
+            }
+          }
+          this.emit("disconnected", { reason, message: this.lastErrorLine });
         }
       });
 
@@ -342,7 +357,7 @@ export class NrfutilRttTransport extends EventEmitter implements Transport {
         if (!resolved) {
           resolved = true;
           proc.kill();
-          reject(new Error("RTT helper timed out connecting to device"));
+          reject(new TransportError("RTT helper timed out connecting to device"));
         }
       }, 15_000);
     });
