@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import type { LogEntry } from "../parser/types";
+import type { LogScopeError } from "../errors";
 
 /** JSON-safe entry sent to the WebView */
 interface SerializedEntry {
@@ -164,8 +165,15 @@ export class LogScopePanel {
   }
 
   /** Notify WebView that connection attempt failed */
-  sendConnectError(message: string): void {
-    this.panel?.webview.postMessage({ type: "connectError", message });
+  sendConnectError(error: LogScopeError): void {
+    this.panel?.webview.postMessage({
+      type: "connectError",
+      code: error.code,
+      headline: error.headline,
+      detail: error.detail,
+      actions: error.actions,
+      severity: error.severity,
+    });
   }
 
   /** Notify WebView that a board reset was detected */

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { execFile } from "child_process";
 import { NrfutilRttTransport, discoverDevices, resolveSystemPython } from "./transport/nrfutil-rtt";
 import type { DiscoveredDevice } from "./transport/nrfutil-rtt";
 import { UartTransport, discoverSerialPorts } from "./transport/uart-serial";
@@ -14,6 +15,8 @@ import { LogScopePanel } from "./ui/webview-provider";
 import { StatusBar } from "./ui/status-bar";
 import { LogScopeSidebarProvider } from "./ui/sidebar-provider";
 import type { Transport } from "./transport/types";
+import { TransportError, classifyError } from "./errors";
+import type { LogScopeError, ErrorAction } from "./errors";
 
 // ── Module-level state ──────────────────────────────────────────
 let transport: Transport | null = null;
@@ -119,8 +122,16 @@ function wireTransportEvents(t: Transport): void {
     panel?.sendReset();
   });
 
-  t.on("disconnected", () => {
+  t.on("disconnected", (info?: { reason?: string; message?: string }) => {
     if (!userDisconnecting) {
+      if (info?.reason) {
+        const error = classifyError(
+          info.message || "Connection lost",
+          undefined,
+          sidebarProvider.currentDevice,
+        );
+        panel?.sendConnectError(error);
+      }
       panel?.sendDisconnected(true);
       sidebarProvider.updateState({ connected: false, connecting: false });
     }
@@ -162,6 +173,35 @@ function disconnectAll(): void {
   stopStatusUpdates();
   statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
   panel?.updateStatus(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
+}
+
+function handleErrorAction(action: ErrorAction): void {
+  switch (action.command) {
+    case "rescan":
+      vscode.commands.executeCommand("logscope.connect");
+      break;
+    case "reconnect":
+    case "retry":
+      vscode.commands.executeCommand("logscope.reconnect");
+      break;
+    case "resetDevice":
+      resetAndReconnect(action.args?.[0] as string);
+      break;
+    case "downloadPython":
+      vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/"));
+      break;
+  }
+}
+
+async function resetAndReconnect(serialNumber?: string): Promise<void> {
+  if (!serialNumber) return;
+  execFile("nrfutil", ["device", "reset", "--serial-number", serialNumber], (err) => {
+    if (err) {
+      vscode.window.showWarningMessage(`LogScope: Could not reset device \u2014 ${err.message}`);
+      return;
+    }
+    setTimeout(() => doConnect(), 2000);
+  });
 }
 
 // ── Connect helpers ─────────────────────────────────────────────
@@ -301,11 +341,30 @@ async function doConnect(): Promise<void> {
       await connectAndShowRtt(device, parserMode);
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(`LogScope: Connection failed — ${message}`);
-    panel?.sendConnectError(message);
-    sidebarProvider.updateState({ connecting: false, connected: false }); // Fix #2
+    // Clean up failed connection
     disconnectAll();
+    sidebarProvider.updateState({ connecting: false, connected: false });
+
+    const message = err instanceof Error ? err.message : String(err);
+    const exitCode = err instanceof TransportError ? err.exitCode : undefined;
+    const serialNumber = sidebarProvider.currentDevice;
+    const error = classifyError(message, exitCode, serialNumber);
+
+    // Webview error card
+    panel?.sendConnectError(error);
+
+    // Reset before awaiting toast so Retry/Reconnect can call doConnect() again
+    connectInFlight = false;
+
+    // Toast notification with action buttons
+    const picked = await vscode.window.showErrorMessage(
+      `LogScope: ${error.headline}`,
+      ...error.actions.map(a => a.label),
+    );
+    if (picked) {
+      const action = error.actions.find(a => a.label === picked);
+      if (action) handleErrorAction(action);
+    }
   } finally {
     connectInFlight = false;
   }
@@ -466,6 +525,8 @@ async function pickSerialPort(showBack = false): Promise<{ path: string; label: 
     qp.items = [{ label: "Scanning..." }];
     const ports = await discoverSerialPorts();
     if (ports.length === 0) {
+      const error = classifyError("No serial ports found");
+      panel?.sendConnectError(error);
       qp.items = [{ label: "No serial ports found" }, { label: "$(refresh) Rescan", _rescan: true }];
       qp.busy = false;
       return;
@@ -891,6 +952,16 @@ export function activate(context: vscode.ExtensionContext) {
         }
         break;
       }
+
+      case "errorAction": {
+        const action: ErrorAction = {
+          label: "",
+          command: msg.action as string,
+          args: msg.args as unknown[],
+        };
+        handleErrorAction(action);
+        break;
+      }
     }
   });
 
@@ -968,6 +1039,11 @@ export function activate(context: vscode.ExtensionContext) {
           setTimeout(() => attemptAutoConnect(attempt + 1), RETRY_DELAYS[attempt]);
         } else {
           console.log(`[LogScope] Auto-connect failed after ${MAX_RETRIES + 1} attempts`);
+          const message = err instanceof Error ? err.message : String(err);
+          const exitCode = err instanceof TransportError ? err.exitCode : undefined;
+          const error = classifyError(message, exitCode, sidebarProvider.currentDevice);
+          panel?.sendConnectError(error);
+          // No toast — too intrusive on startup
         }
       }
     };
