@@ -3,6 +3,7 @@ import { ChildProcess, spawn } from "node:child_process";
 import * as path from "node:path";
 import type { Transport } from "./types";
 import { ensurePythonEnv } from "./nrfutil-rtt";
+import { TransportError } from "../errors";
 
 /** Configuration for UART serial transport */
 export interface UartTransportConfig {
@@ -132,7 +133,7 @@ export class UartTransport extends EventEmitter implements Transport {
         if (!resolved && stderrBuf.includes("ERROR:")) {
           resolved = true;
           const errLine = stderrBuf.split("\n").find(l => l.includes("ERROR:")) ?? "Unknown error";
-          reject(new Error(errLine.replace(/^ERROR:\s*/i, "")));
+          reject(new TransportError(errLine.replace(/^ERROR:\s*/i, "")));
         }
       });
 
@@ -150,9 +151,9 @@ export class UartTransport extends EventEmitter implements Transport {
 
         if (!resolved) {
           resolved = true;
-          reject(new Error(`UART helper exited with code ${code} before connecting`));
+          reject(new TransportError(`UART helper exited with code ${code} before connecting`, code ?? undefined));
         } else if (wasConnected) {
-          this.emit("disconnected");
+          this.emit("disconnected", { reason: "UART_DISCONNECTED" });
         }
       });
 
