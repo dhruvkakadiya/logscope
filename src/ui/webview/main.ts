@@ -528,6 +528,7 @@ function handleInitMessage(msg: { wrapEnabled?: boolean }): void {
 }
 
 function handleConnectingMessage(): void {
+  document.getElementById("error-card")!.className = "hidden";
   connectToggleBtn.textContent = "Connecting...";
   connectToggleBtn.className = "conn-btn";
   (connectToggleBtn as HTMLButtonElement).disabled = true;
@@ -602,7 +603,60 @@ function handleDisconnectedMessage(msg: { unexpected?: boolean }): void {
   }
 }
 
-function handleConnectErrorMessage(): void {
+function handleConnectErrorMessage(msg: {
+  headline: string;
+  detail: string;
+  actions: { label: string; command: string; args?: unknown[] }[];
+  severity: "error" | "warning";
+}): void {
+  const card = document.getElementById("error-card")!;
+  card.className = `error-card ${msg.severity}`;
+  card.textContent = "";  // clear previous content
+
+  // Header row: headline + dismiss button
+  const header = document.createElement("div");
+  header.className = "error-card-header";
+
+  const headline = document.createElement("span");
+  headline.className = "error-card-headline";
+  headline.textContent = msg.headline;
+  header.appendChild(headline);
+
+  const dismiss = document.createElement("button");
+  dismiss.className = "error-card-dismiss";
+  dismiss.title = "Dismiss";
+  dismiss.textContent = "\u00D7";  // × character
+  dismiss.addEventListener("click", () => { card.className = "hidden"; });
+  header.appendChild(dismiss);
+
+  card.appendChild(header);
+
+  // Detail text
+  const detail = document.createElement("div");
+  detail.className = "error-card-detail";
+  detail.textContent = msg.detail;
+  card.appendChild(detail);
+
+  // Action buttons
+  if (msg.actions.length > 0) {
+    const actions = document.createElement("div");
+    actions.className = "error-card-actions";
+
+    for (const a of msg.actions) {
+      const btn = document.createElement("button");
+      btn.className = "error-card-btn";
+      btn.textContent = a.label;
+      btn.addEventListener("click", () => {
+        vscode.postMessage({ type: "errorAction", action: a.command, args: a.args || [] });
+        card.className = "hidden";
+      });
+      actions.appendChild(btn);
+    }
+
+    card.appendChild(actions);
+  }
+
+  // Also update the status bar
   connStatusDot.className = "dot amber";
   connStatusText.textContent = "Connection failed";
   connectToggleBtn.textContent = "Connect";
@@ -701,7 +755,7 @@ window.addEventListener("message", (event) => {
     case "connecting":   handleConnectingMessage(); break;
     case "connected":    handleConnectedMessage(msg); break;
     case "disconnected": handleDisconnectedMessage(msg); break;
-    case "connectError": handleConnectErrorMessage(); break;
+    case "connectError": handleConnectErrorMessage(msg as any); break;
     case "entries":      handleEntriesMessage(msg); break;
     case "status":       handleStatusMessage(msg); break;
     case "modules":      handleModulesMessage(msg); break;
