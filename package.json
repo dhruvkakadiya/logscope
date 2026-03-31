@@ -258,6 +258,16 @@
           "default": false,
           "description": "Wrap long log messages instead of truncating. Toggle via the wrap button in the viewer."
         },
+        "logscope.timeFormat": {
+          "type": "string",
+          "default": "24h",
+          "enum": ["24h", "12h"],
+          "enumDescriptions": [
+            "24-hour format (e.g., 19:46:40.106)",
+            "12-hour format with AM/PM (e.g., 7:46:40.106 PM)"
+          ],
+          "description": "Time format for the wall-clock Time column."
+        },
         "logscope.jlink.path": {
           "type": "string",
           "default": "",

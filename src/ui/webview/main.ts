@@ -80,17 +80,21 @@ function formatTimestamp(us: number): string {
   );
 }
 
+let use12HourTime = false;
+
 function formatWallClock(epochMs: number): string {
   const d = new Date(epochMs);
-  return (
-    String(d.getHours()).padStart(2, "0") +
-    ":" +
-    String(d.getMinutes()).padStart(2, "0") +
-    ":" +
-    String(d.getSeconds()).padStart(2, "0") +
-    "." +
-    String(d.getMilliseconds()).padStart(3, "0")
-  );
+  const mins = String(d.getMinutes()).padStart(2, "0");
+  const secs = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+
+  if (use12HourTime) {
+    let hours = d.getHours();
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12 || 12;
+    return `${hours}:${mins}:${secs}.${ms} ${ampm}`;
+  }
+  return `${String(d.getHours()).padStart(2, "0")}:${mins}:${secs}.${ms}`;
 }
 
 // ── Row creation (XSS-safe: uses textContent, never innerHTML) ──
@@ -521,10 +525,11 @@ function clearTimeline(): void {
 }
 
 // ── Message handler helpers ──────────────────────────────────────
-function handleInitMessage(msg: { wrapEnabled?: boolean }): void {
+function handleInitMessage(msg: { wrapEnabled?: boolean; timeFormat?: string }): void {
   wrapEnabled = msg.wrapEnabled ?? false;
   wrapBtn.classList.toggle("active", wrapEnabled);
   timeline.classList.toggle("wrap-mode", wrapEnabled);
+  use12HourTime = msg.timeFormat === "12h";
 }
 
 function handleConnectingMessage(): void {
@@ -572,7 +577,7 @@ function handleConnectedMessage(msg: { address?: string; transport?: string; par
   const modulePicker = document.getElementById("module-picker")!;
   severityToggles.style.display = isRawMode ? "none" : "";
   modulePicker.style.display = isRawMode ? "none" : "";
-  timestampBtn.style.display = isRawMode ? "none" : "";
+  timestampBtn.style.display = noDeviceTs ? "none" : "";
 
   connectToggleBtn.textContent = "Disconnect";
   connectToggleBtn.className = "conn-btn disconnect";

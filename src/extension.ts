@@ -44,6 +44,7 @@ function getConfig() {
     nrfutilPath: cfg.get<string>("nrfutil.path", "nrfutil"),
     rttPollInterval: cfg.get<number>("rtt.pollInterval", 50),
     logWrap: cfg.get<boolean>("logWrap", false),
+    timeFormat: cfg.get<string>("timeFormat", "24h"),
   };
 }
 
@@ -267,7 +268,7 @@ async function connectAndShowUart(device: string, baudRate: number, parserMode: 
   await saveSetting("transport", "uart");
 
   const cfg = getConfig();
-  panel?.show(cfg.logWrap);
+  panel?.show(cfg.logWrap, cfg.timeFormat);
   // Fix #1: delay sendConnected to let webview load (show() uses 100ms for init)
   setTimeout(() => panel?.sendConnected("Serial UART", device, parserMode), 150);
   sidebarProvider.updateState({
@@ -285,7 +286,7 @@ async function connectAndShowRtt(device: string, parserMode: string): Promise<vo
   await saveSetting("transport", "rtt");
 
   const cfg = getConfig();
-  panel?.show(cfg.logWrap);
+  panel?.show(cfg.logWrap, cfg.timeFormat);
   setTimeout(() => panel?.sendConnected("J-Link RTT", displayName, parserMode), 150);
   sidebarProvider.updateState({
     connected: true, connecting: false,
@@ -325,12 +326,15 @@ async function doConnect(): Promise<void> {
       userDisconnecting = true;
       disconnectAll();
       panel?.sendDisconnected(false);
-      setTimeout(() => { userDisconnecting = false; }, 100);
+      // Keep userDisconnecting=true until after the new connection succeeds
+      // (reset in the success path below, not on a timer)
     }
 
     bootDetected = true; // Assume device has already booted — any boot banner seen is a reset
     hciPacketCount = 0;
     errorCount = 0;
+    watchMatcher.resetCounters();
+    panel?.clear(); // Clear previous session's logs from the webview
 
     sidebarProvider.updateState({ connecting: true });
     panel?.sendConnecting();
@@ -340,8 +344,11 @@ async function doConnect(): Promise<void> {
     } else {
       await connectAndShowRtt(device, parserMode);
     }
+    // Connection succeeded — reset disconnect flag and clear any error state
+    userDisconnecting = false;
   } catch (err) {
     // Clean up failed connection
+    userDisconnecting = false;
     disconnectAll();
     sidebarProvider.updateState({ connecting: false, connected: false });
 
@@ -969,7 +976,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const openCmd = vscode.commands.registerCommand("logscope.open", () => {
     const cfg = getConfig();
-    panel?.show(cfg.logWrap);
+    panel?.show(cfg.logWrap, cfg.timeFormat);
     // If connected, send state to the (possibly fresh) webview
     if (transport?.connected) {
       const currentParser = vscode.workspace.getConfiguration("logscope").get<string>("parser", "zephyr");
