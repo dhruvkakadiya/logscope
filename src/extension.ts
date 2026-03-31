@@ -126,14 +126,17 @@ function wireTransportEvents(t: Transport): void {
   t.on("disconnected", (info?: { reason?: string; message?: string }) => {
     if (!userDisconnecting) {
       if (info?.reason) {
+        // Show structured error card (no reconnect bar — reconnecting won't help)
         const error = classifyError(
           info.message || "Connection lost",
           undefined,
           sidebarProvider.currentDevice,
         );
         panel?.sendConnectError(error);
+        panel?.sendDisconnected(false); // false = don't show reconnect bar
+      } else {
+        panel?.sendDisconnected(true); // true = show reconnect bar
       }
-      panel?.sendDisconnected(true);
       sidebarProvider.updateState({ connected: false, connecting: false });
     }
     statusBar?.update(false, ringBuffer?.size ?? 0, ringBuffer?.evictedCount ?? 0);
@@ -333,7 +336,6 @@ async function doConnect(): Promise<void> {
     bootDetected = true; // Assume device has already booted — any boot banner seen is a reset
     hciPacketCount = 0;
     errorCount = 0;
-    watchMatcher.resetCounters();
     panel?.clear(); // Clear previous session's logs from the webview
 
     sidebarProvider.updateState({ connecting: true });
@@ -355,6 +357,7 @@ async function doConnect(): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const exitCode = err instanceof TransportError ? err.exitCode : undefined;
     const serialNumber = sidebarProvider.currentDevice;
+    console.error("[LogScope] Connection error details:", { message, exitCode, errType: err?.constructor?.name, raw: err });
     const error = classifyError(message, exitCode, serialNumber);
 
     // Webview error card

@@ -100,6 +100,16 @@ describe("classifyError — message pattern matching", () => {
     expect(result.code).toBe("UART_OPEN_FAILED");
   });
 
+  it("maps 'could not open port' to UART_OPEN_FAILED", () => {
+    const result = classifyError("[Errno 2] could not open port /dev/cu.usbmodem0010502431971: [Errno 2] No such file or directory");
+    expect(result.code).toBe("UART_DISCONNECTED");
+  });
+
+  it("maps 'No such file or directory' to UART_DISCONNECTED", () => {
+    const result = classifyError("No such file or directory: '/dev/ttyUSB0'");
+    expect(result.code).toBe("UART_DISCONNECTED");
+  });
+
   it("maps 'Serial device disconnected' to UART_DISCONNECTED", () => {
     const result = classifyError("Serial device disconnected");
     expect(result.code).toBe("UART_DISCONNECTED");

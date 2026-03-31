@@ -126,10 +126,27 @@ export function classifyError(
     };
   }
 
+  // Check "disconnected" patterns before "open failed" — a message like
+  // "could not open port...No such file or directory" means the device is
+  // gone, not that the port is busy.
+  if (
+    msg.includes("Serial device disconnected") ||
+    msgLower.includes("no such file or directory")
+  ) {
+    return {
+      code: "UART_DISCONNECTED",
+      headline: "Serial device disconnected",
+      detail: "The USB serial device was unplugged or powered off.",
+      actions: [ACTION_RESCAN],
+      severity: "error",
+    };
+  }
+
   if (
     msg.includes("port is already open") ||
     msgLower.includes("permission denied") ||
-    msgLower.includes("cannot open")
+    msgLower.includes("cannot open") ||
+    msgLower.includes("could not open port")
   ) {
     return {
       code: "UART_OPEN_FAILED",
@@ -138,16 +155,6 @@ export function classifyError(
         "The port may be in use by another application (e.g., another terminal, VS Code Serial Monitor). Close other connections and try again.",
       actions: [ACTION_RETRY],
       severity: "warning",
-    };
-  }
-
-  if (msg.includes("Serial device disconnected")) {
-    return {
-      code: "UART_DISCONNECTED",
-      headline: "Serial device disconnected",
-      detail: "The USB serial device was unplugged or powered off.",
-      actions: [ACTION_RESCAN],
-      severity: "error",
     };
   }
 

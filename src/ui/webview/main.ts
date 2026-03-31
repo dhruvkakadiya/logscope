@@ -52,6 +52,7 @@ const dismissBtn = document.getElementById("dismiss-btn")!;
 let isConnected = false;
 const wrapBtn = document.getElementById("wrap-btn")!;
 const timestampBtn = document.getElementById("timestamp-btn")!;
+const timeFormatBtn = document.getElementById("time-format-btn")!;
 
 // ── State ───────────────────────────────────────────────────────
 let autoScroll = true;
@@ -106,6 +107,7 @@ function createRow(entry: SerializedEntry): HTMLDivElement {
   const time = document.createElement("span");
   time.className = "time";
   time.textContent = entry.receivedAt ? formatWallClock(entry.receivedAt) : "";
+  if (entry.receivedAt) time.dataset.epoch = String(entry.receivedAt);
 
   const ts = document.createElement("span");
   ts.className = "ts";
@@ -118,10 +120,12 @@ function createRow(entry: SerializedEntry): HTMLDivElement {
   const mod = document.createElement("span");
   mod.className = "mod";
   mod.textContent = entry.module;
+  mod.title = entry.module;
 
   const msg = document.createElement("span");
   msg.className = "msg";
   msg.textContent = entry.message;
+  msg.title = entry.message;
 
   // Make HCI rows with decoded data expandable
   if (entry.decoded) {
@@ -367,6 +371,20 @@ wrapBtn.addEventListener("click", () => {
   vscode.postMessage({ type: "updateSetting", key: "logscope.logWrap", value: wrapEnabled });
 });
 
+timeFormatBtn.addEventListener("click", () => {
+  use12HourTime = !use12HourTime;
+  timeFormatBtn.classList.toggle("active", use12HourTime);
+  timeFormatBtn.textContent = use12HourTime ? "24h" : "12h";
+  viewerEl.classList.toggle("time-12h", use12HourTime);
+  vscode.postMessage({ type: "updateSetting", key: "logscope.timeFormat", value: use12HourTime ? "12h" : "24h" });
+  // Re-render existing time cells
+  const timeCells = document.querySelectorAll(".log-row .time");
+  for (const cell of timeCells) {
+    const epochMs = Number((cell as HTMLElement).dataset.epoch);
+    if (epochMs) (cell as HTMLElement).textContent = formatWallClock(epochMs);
+  }
+});
+
 // ── Filter controls ─────────────────────────────────────────────
 
 // Check all / uncheck all severity buttons
@@ -530,6 +548,9 @@ function handleInitMessage(msg: { wrapEnabled?: boolean; timeFormat?: string }):
   wrapBtn.classList.toggle("active", wrapEnabled);
   timeline.classList.toggle("wrap-mode", wrapEnabled);
   use12HourTime = msg.timeFormat === "12h";
+  timeFormatBtn.classList.toggle("active", use12HourTime);
+  timeFormatBtn.textContent = use12HourTime ? "24h" : "12h";
+  viewerEl.classList.toggle("time-12h", use12HourTime);
 }
 
 function handleConnectingMessage(): void {
