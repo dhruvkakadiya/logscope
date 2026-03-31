@@ -366,14 +366,17 @@ async function doConnect(): Promise<void> {
     // Reset before awaiting toast so Retry/Reconnect can call doConnect() again
     connectInFlight = false;
 
-    // Toast notification with action buttons
-    const picked = await vscode.window.showErrorMessage(
-      `LogScope: ${error.headline}`,
-      ...error.actions.map(a => a.label),
-    );
-    if (picked) {
-      const action = error.actions.find(a => a.label === picked);
-      if (action) handleErrorAction(action);
+    // Toast notification — skip for disconnect-type errors (card is sufficient)
+    const skipToast = error.code === "UART_DISCONNECTED" || error.code === "PROBE_UNPLUGGED";
+    if (!skipToast) {
+      const picked = await vscode.window.showErrorMessage(
+        `LogScope: ${error.headline}`,
+        ...error.actions.map(a => a.label),
+      );
+      if (picked) {
+        const action = error.actions.find(a => a.label === picked);
+        if (action) handleErrorAction(action);
+      }
     }
   } finally {
     connectInFlight = false;
