@@ -357,7 +357,6 @@ async function doConnect(): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const exitCode = err instanceof TransportError ? err.exitCode : undefined;
     const serialNumber = sidebarProvider.currentDevice;
-    console.error("[LogScope] Connection error details:", { message, exitCode, errType: err?.constructor?.name, raw: err });
     const error = classifyError(message, exitCode, serialNumber);
 
     // Webview error card
